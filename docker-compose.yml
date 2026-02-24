@@ -1,0 +1,21 @@
+services:
+  proxy-manager:
+    build: .
+    container_name: proxy-manager
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - CLIENT_URL=${CLIENT_URL}
+      - DATABASE_PATH=/app/data/proxy.db
+    volumes:
+      - proxy-data:/app/data
+
+volumes:
+  proxy-data:
