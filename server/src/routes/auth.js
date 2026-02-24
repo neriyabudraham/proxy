@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import { db } from '../db.js';
 import { generateToken } from '../middleware/auth.js';
 import { sendPasswordResetEmail } from '../mail.js';
@@ -9,6 +10,7 @@ import { sendPasswordResetEmail } from '../mail.js';
 const router = Router();
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'office@neriyabudraham.co.il';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 router.get('/check-setup', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(ADMIN_EMAIL);
@@ -129,6 +131,52 @@ router.post('/reset-password', async (req, res) => {
   db.prepare('DELETE FROM password_resets WHERE id = ?').run(reset.id);
   
   res.json({ success: true });
+});
+
+router.post('/google', async (req, res) => {
+  const { credential } = req.body;
+  
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+    
+    const payload = ticket.getPayload();
+    const email = payload.email;
+    
+    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    
+    if (!user) {
+      if (email === ADMIN_EMAIL) {
+        db.prepare('INSERT INTO users (email, name, role, password_setup) VALUES (?, ?, ?, 1)')
+          .run(email, payload.name, 'admin');
+        user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+      } else {
+        return res.status(403).json({ error: 'User not authorized' });
+      }
+    }
+    
+    const token = generateToken(user);
+    
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    
+    res.json({
+      user: { id: user.id, email: user.email, name: user.name || payload.name, role: user.role }
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(401).json({ error: 'Invalid Google token' });
+  }
+});
+
+router.get('/google-client-id', (req, res) => {
+  res.json({ clientId: process.env.GOOGLE_CLIENT_ID || '' });
 });
 
 export default router;

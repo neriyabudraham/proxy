@@ -13,6 +13,7 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
       - CLIENT_URL=${CLIENT_URL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - DATABASE_PATH=/app/data/proxy.db
     volumes:
       - proxy-data:/app/data
