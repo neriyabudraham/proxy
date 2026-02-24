@@ -16,8 +16,6 @@ RUN npm install
 COPY server/ ./
 COPY --from=client-builder /app/client/dist ./public
 
-RUN mkdir -p /app/data
-
 ENV NODE_ENV=production
 ENV PORT=3000
 

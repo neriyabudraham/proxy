@@ -3,47 +3,65 @@ import { db } from '../db.js';
 
 const router = Router();
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const userId = req.user.role === 'viewer' && req.user.parentId 
     ? req.user.parentId 
     : req.user.id;
   
-  const servers = db.prepare(`
-    SELECT * FROM servers WHERE user_id = ? ORDER BY created_at DESC
-  `).all(userId);
+  const servers = await db.query(
+    'SELECT * FROM servers WHERE user_id = $1 ORDER BY created_at DESC',
+    [userId]
+  );
   
-  const result = servers.map(server => ({
-    ...server,
-    proxyIps: db.prepare('SELECT * FROM proxy_ips WHERE server_id = ? ORDER BY port').all(server.id)
+  const result = await Promise.all(servers.map(async (server) => {
+    const proxyIps = await db.query(
+      'SELECT * FROM proxy_ips WHERE server_id = $1 ORDER BY port',
+      [server.id]
+    );
+    
+    const proxyIpsWithPhones = await Promise.all(proxyIps.map(async (proxy) => {
+      const phones = await db.query(
+        'SELECT * FROM phone_numbers WHERE proxy_id = $1 ORDER BY created_at',
+        [proxy.id]
+      );
+      return { ...proxy, phones };
+    }));
+    
+    return { ...server, proxyIps: proxyIpsWithPhones };
   }));
   
   res.json(result);
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   if (req.user.role === 'viewer') {
     return res.status(403).json({ error: 'Forbidden' });
   }
   
   const { name, mainIp, proxyIps } = req.body;
   
-  const result = db.prepare('INSERT INTO servers (name, main_ip, user_id) VALUES (?, ?, ?)')
-    .run(name, mainIp, req.user.id);
+  const result = await db.execute(
+    'INSERT INTO servers (name, main_ip, user_id) VALUES ($1, $2, $3) RETURNING id',
+    [name, mainIp, req.user.id]
+  );
   
-  const serverId = result.lastInsertRowid;
+  const serverId = result.rows[0].id;
   
-  proxyIps.forEach((ip, index) => {
-    db.prepare('INSERT INTO proxy_ips (ip, port, server_id) VALUES (?, ?, ?)')
-      .run(ip, 8080 + index, serverId);
-  });
+  for (let i = 0; i < proxyIps.length; i++) {
+    await db.execute(
+      'INSERT INTO proxy_ips (ip, port, server_id) VALUES ($1, $2, $3)',
+      [proxyIps[i], 8080 + i, serverId]
+    );
+  }
   
-  const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(serverId);
-  server.proxyIps = db.prepare('SELECT * FROM proxy_ips WHERE server_id = ?').all(serverId);
+  const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [serverId]);
+  const ips = await db.query('SELECT * FROM proxy_ips WHERE server_id = $1', [serverId]);
+  server.proxyIps = ips.map(ip => ({ ...ip, phones: [] }));
   
   res.json(server);
 });
 
-router.put('/:id', (req, res) => {
+router.put('/:id', async (req, res) => {
   if (req.user.role === 'viewer') {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -51,37 +69,70 @@ router.put('/:id', (req, res) => {
   const { id } = req.params;
   const { name, mainIp, proxyIps } = req.body;
   
-  db.prepare('UPDATE servers SET name = ?, main_ip = ? WHERE id = ?').run(name, mainIp, id);
-  db.prepare('DELETE FROM proxy_ips WHERE server_id = ?').run(id);
+  await db.execute('UPDATE servers SET name = $1, main_ip = $2 WHERE id = $3', [name, mainIp, id]);
+  await db.execute('DELETE FROM proxy_ips WHERE server_id = $1', [id]);
   
-  proxyIps.forEach((ip, index) => {
-    db.prepare('INSERT INTO proxy_ips (ip, port, server_id) VALUES (?, ?, ?)')
-      .run(ip, 8080 + index, id);
-  });
+  for (let i = 0; i < proxyIps.length; i++) {
+    await db.execute(
+      'INSERT INTO proxy_ips (ip, port, server_id) VALUES ($1, $2, $3)',
+      [proxyIps[i], 8080 + i, id]
+    );
+  }
   
-  const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(id);
-  server.proxyIps = db.prepare('SELECT * FROM proxy_ips WHERE server_id = ?').all(id);
+  const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [id]);
+  const ips = await db.query('SELECT * FROM proxy_ips WHERE server_id = $1', [id]);
+  server.proxyIps = ips.map(ip => ({ ...ip, phones: [] }));
   
   res.json(server);
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   if (req.user.role === 'viewer') {
     return res.status(403).json({ error: 'Forbidden' });
   }
   
-  db.prepare('DELETE FROM servers WHERE id = ?').run(req.params.id);
+  await db.execute('DELETE FROM servers WHERE id = $1', [req.params.id]);
   res.json({ success: true });
 });
 
-router.get('/:id/script', (req, res) => {
-  const server = db.prepare('SELECT * FROM servers WHERE id = ?').get(req.params.id);
+// Phone number management
+router.post('/proxy/:proxyId/phones', async (req, res) => {
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  const { proxyId } = req.params;
+  const { phone } = req.body;
+  
+  await db.execute(
+    'INSERT INTO phone_numbers (phone, proxy_id) VALUES ($1, $2)',
+    [phone, proxyId]
+  );
+  
+  const phones = await db.query('SELECT * FROM phone_numbers WHERE proxy_id = $1', [proxyId]);
+  res.json(phones);
+});
+
+router.delete('/proxy/:proxyId/phones/:phoneId', async (req, res) => {
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  await db.execute('DELETE FROM phone_numbers WHERE id = $1', [req.params.phoneId]);
+  res.json({ success: true });
+});
+
+router.get('/:id/script', async (req, res) => {
+  const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [req.params.id]);
   
   if (!server) {
     return res.status(404).json({ error: 'Server not found' });
   }
   
-  const proxyIps = db.prepare('SELECT * FROM proxy_ips WHERE server_id = ? ORDER BY port').all(server.id);
+  const proxyIps = await db.query(
+    'SELECT * FROM proxy_ips WHERE server_id = $1 ORDER BY port',
+    [server.id]
+  );
   const ips = proxyIps.map(p => p.ip);
   const ipsString = ips.map(ip => `"${ip}"`).join(' ');
   

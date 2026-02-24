@@ -12,8 +12,8 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'office@neriyabudraham.co.il';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-router.get('/check-setup', (req, res) => {
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(ADMIN_EMAIL);
+router.get('/check-setup', async (req, res) => {
+  const user = await db.queryOne('SELECT * FROM users WHERE email = $1', [ADMIN_EMAIL]);
   res.json({ needsSetup: !user || !user.password_setup });
 });
 
@@ -26,14 +26,14 @@ router.post('/setup-password', async (req, res) => {
   
   const hashedPassword = await bcrypt.hash(password, 12);
   
-  const existing = db.prepare('SELECT * FROM users WHERE email = ?').get(ADMIN_EMAIL);
+  const existing = await db.queryOne('SELECT * FROM users WHERE email = $1', [ADMIN_EMAIL]);
   
   if (existing) {
-    db.prepare('UPDATE users SET password = ?, password_setup = 1, role = ? WHERE email = ?')
-      .run(hashedPassword, 'admin', ADMIN_EMAIL);
+    await db.execute('UPDATE users SET password = $1, password_setup = true, role = $2 WHERE email = $3',
+      [hashedPassword, 'admin', ADMIN_EMAIL]);
   } else {
-    db.prepare('INSERT INTO users (email, password, role, password_setup) VALUES (?, ?, ?, 1)')
-      .run(ADMIN_EMAIL, hashedPassword, 'admin');
+    await db.execute('INSERT INTO users (email, password, role, password_setup) VALUES ($1, $2, $3, true)',
+      [ADMIN_EMAIL, hashedPassword, 'admin']);
   }
   
   res.json({ success: true });
@@ -42,7 +42,7 @@ router.post('/setup-password', async (req, res) => {
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
   
   if (!user || !user.password) {
     return res.status(401).json({ error: 'Invalid credentials' });
@@ -73,7 +73,7 @@ router.post('/logout', (req, res) => {
   res.json({ success: true });
 });
 
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   const token = req.cookies.token;
   
   if (!token) {
@@ -82,7 +82,7 @@ router.get('/me', (req, res) => {
   
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = db.prepare('SELECT id, email, name, role, parent_id FROM users WHERE id = ?').get(decoded.id);
+    const user = await db.queryOne('SELECT id, email, name, role, parent_id FROM users WHERE id = $1', [decoded.id]);
     res.json({ user });
   } catch {
     res.json({ user: null });
@@ -92,17 +92,17 @@ router.get('/me', (req, res) => {
 router.post('/forgot-password', async (req, res) => {
   const { email } = req.body;
   
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
   
   if (!user) {
     return res.json({ success: true });
   }
   
   const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   
-  db.prepare('INSERT INTO password_resets (email, token, expires_at) VALUES (?, ?, ?)')
-    .run(email, token, expiresAt);
+  await db.execute('INSERT INTO password_resets (email, token, expires_at) VALUES ($1, $2, $3)',
+    [email, token, expiresAt]);
   
   try {
     await sendPasswordResetEmail(email, token);
@@ -116,8 +116,10 @@ router.post('/forgot-password', async (req, res) => {
 router.post('/reset-password', async (req, res) => {
   const { token, password } = req.body;
   
-  const reset = db.prepare('SELECT * FROM password_resets WHERE token = ? AND expires_at > ?')
-    .get(token, new Date().toISOString());
+  const reset = await db.queryOne(
+    'SELECT * FROM password_resets WHERE token = $1 AND expires_at > $2',
+    [token, new Date()]
+  );
   
   if (!reset) {
     return res.status(400).json({ error: 'Invalid or expired token' });
@@ -125,10 +127,10 @@ router.post('/reset-password', async (req, res) => {
   
   const hashedPassword = await bcrypt.hash(password, 12);
   
-  db.prepare('UPDATE users SET password = ?, password_setup = 1 WHERE email = ?')
-    .run(hashedPassword, reset.email);
+  await db.execute('UPDATE users SET password = $1, password_setup = true WHERE email = $2',
+    [hashedPassword, reset.email]);
   
-  db.prepare('DELETE FROM password_resets WHERE id = ?').run(reset.id);
+  await db.execute('DELETE FROM password_resets WHERE id = $1', [reset.id]);
   
   res.json({ success: true });
 });
@@ -145,13 +147,13 @@ router.post('/google', async (req, res) => {
     const payload = ticket.getPayload();
     const email = payload.email;
     
-    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    let user = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
     
     if (!user) {
       if (email === ADMIN_EMAIL) {
-        db.prepare('INSERT INTO users (email, name, role, password_setup) VALUES (?, ?, ?, 1)')
-          .run(email, payload.name, 'admin');
-        user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        await db.execute('INSERT INTO users (email, name, role, password_setup) VALUES ($1, $2, $3, true)',
+          [email, payload.name, 'admin']);
+        user = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
       } else {
         return res.status(403).json({ error: 'User not authorized' });
       }
@@ -229,13 +231,13 @@ router.get('/callback/google', async (req, res) => {
     const payload = ticket.getPayload();
     const email = payload.email;
     
-    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    let user = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
     
     if (!user) {
       if (email === ADMIN_EMAIL) {
-        db.prepare('INSERT INTO users (email, name, role, password_setup) VALUES (?, ?, ?, 1)')
-          .run(email, payload.name, 'admin');
-        user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        await db.execute('INSERT INTO users (email, name, role, password_setup) VALUES ($1, $2, $3, true)',
+          [email, payload.name, 'admin']);
+        user = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
       } else {
         return res.redirect('/login?error=unauthorized');
       }

@@ -5,27 +5,39 @@ export default function Dashboard() {
   const { user, logout } = useAuth();
   const [servers, setServers] = useState([]);
   const [users, setUsers] = useState([]);
+  const [apiKeys, setApiKeys] = useState([]);
+  const [settings, setSettings] = useState({ maxPhonesPerProxy: 3 });
   const [activeTab, setActiveTab] = useState('servers');
   const [showServerModal, setShowServerModal] = useState(false);
   const [showUserModal, setShowUserModal] = useState(false);
   const [showScriptModal, setShowScriptModal] = useState(false);
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [script, setScript] = useState('');
   const [selectedServer, setSelectedServer] = useState(null);
+  const [selectedProxy, setSelectedProxy] = useState(null);
   const [editingServer, setEditingServer] = useState(null);
   const [serverForm, setServerForm] = useState({ name: '', mainIp: '', proxyIps: '' });
   const [userForm, setUserForm] = useState({ email: '', name: '', role: 'viewer', parentId: '' });
   const [newUserPassword, setNewUserPassword] = useState('');
-  const [stats, setStats] = useState({ servers: 0, ips: 0, users: 0 });
-  const [copied, setCopied] = useState(false);
+  const [newPhone, setNewPhone] = useState('');
+  const [newApiKeyName, setNewApiKeyName] = useState('');
+  const [newApiKey, setNewApiKey] = useState('');
+  const [stats, setStats] = useState({ servers: 0, ips: 0, users: 0, phones: 0 });
+  const [copied, setCopied] = useState('');
 
   useEffect(() => {
     fetchServers();
+    fetchApiKeys();
+    fetchSettings();
     if (user?.role === 'admin') fetchUsers();
   }, [user]);
 
   useEffect(() => {
     const totalIps = servers.reduce((sum, s) => sum + (s.proxyIps?.length || 0), 0);
-    setStats({ servers: servers.length, ips: totalIps, users: users.length });
+    const totalPhones = servers.reduce((sum, s) => 
+      sum + s.proxyIps?.reduce((pSum, p) => pSum + (p.phones?.length || 0), 0), 0);
+    setStats({ servers: servers.length, ips: totalIps, users: users.length, phones: totalPhones });
   }, [servers, users]);
 
   const fetchServers = async () => {
@@ -38,6 +50,18 @@ export default function Dashboard() {
     const res = await fetch('/api/users', { credentials: 'include' });
     const data = await res.json();
     setUsers(data);
+  };
+
+  const fetchApiKeys = async () => {
+    const res = await fetch('/api/v1/keys', { credentials: 'include' });
+    const data = await res.json();
+    setApiKeys(data);
+  };
+
+  const fetchSettings = async () => {
+    const res = await fetch('/api/v1/settings', { credentials: 'include' });
+    const data = await res.json();
+    setSettings(data);
   };
 
   const handleSaveServer = async (e) => {
@@ -104,10 +128,59 @@ export default function Dashboard() {
     setShowServerModal(true);
   };
 
-  const copyScript = () => {
-    navigator.clipboard.writeText(script);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleAddPhone = async (e) => {
+    e.preventDefault();
+    await fetch(`/api/servers/proxy/${selectedProxy.id}/phones`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ phone: newPhone })
+    });
+    setNewPhone('');
+    fetchServers();
+  };
+
+  const handleRemovePhone = async (phoneId) => {
+    await fetch(`/api/servers/proxy/${selectedProxy.id}/phones/${phoneId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    fetchServers();
+  };
+
+  const handleCreateApiKey = async (e) => {
+    e.preventDefault();
+    const res = await fetch('/api/v1/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name: newApiKeyName })
+    });
+    const data = await res.json();
+    setNewApiKey(data.key);
+    fetchApiKeys();
+  };
+
+  const handleDeleteApiKey = async (id) => {
+    if (!confirm('האם אתה בטוח?')) return;
+    await fetch(`/api/v1/keys/${id}`, { method: 'DELETE', credentials: 'include' });
+    fetchApiKeys();
+  };
+
+  const handleSaveSettings = async () => {
+    await fetch('/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(settings)
+    });
+    alert('ההגדרות נשמרו');
+  };
+
+  const copyToClipboard = (text, id) => {
+    navigator.clipboard.writeText(text);
+    setCopied(id);
+    setTimeout(() => setCopied(''), 2000);
   };
 
   const downloadScript = () => {
@@ -162,44 +235,57 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-6">
-          <div className="bg-white rounded-2xl p-6 shadow-lg shadow-blue-100/50 border border-gray-100 hover:shadow-xl hover:shadow-blue-200/50 transition-all">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
-                <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
+          <div className="bg-white rounded-2xl p-5 shadow-lg shadow-blue-100/50 border border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2" />
                 </svg>
               </div>
               <div>
-                <p className="text-3xl font-bold text-gray-800">{stats.servers}</p>
-                <p className="text-gray-500 font-medium">שרתים</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.servers}</p>
+                <p className="text-gray-500 text-sm">שרתים</p>
               </div>
             </div>
           </div>
-          <div className="bg-white rounded-2xl p-6 shadow-lg shadow-emerald-100/50 border border-gray-100 hover:shadow-xl hover:shadow-emerald-200/50 transition-all">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-200">
-                <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+          <div className="bg-white rounded-2xl p-5 shadow-lg shadow-emerald-100/50 border border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-200">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
                 </svg>
               </div>
               <div>
-                <p className="text-3xl font-bold text-gray-800">{stats.ips}</p>
-                <p className="text-gray-500 font-medium">כתובות IP</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.ips}</p>
+                <p className="text-gray-500 text-sm">פרוקסי</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl p-5 shadow-lg shadow-orange-100/50 border border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-orange-600 rounded-xl flex items-center justify-center shadow-lg shadow-orange-200">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-800">{stats.phones}</p>
+                <p className="text-gray-500 text-sm">טלפונים</p>
               </div>
             </div>
           </div>
           {isAdmin && (
-            <div className="bg-white rounded-2xl p-6 shadow-lg shadow-purple-100/50 border border-gray-100 hover:shadow-xl hover:shadow-purple-200/50 transition-all">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 bg-gradient-to-br from-purple-400 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-200">
-                  <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-white rounded-2xl p-5 shadow-lg shadow-purple-100/50 border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-400 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-200">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
                   </svg>
                 </div>
                 <div>
-                  <p className="text-3xl font-bold text-gray-800">{stats.users}</p>
-                  <p className="text-gray-500 font-medium">משתמשים</p>
+                  <p className="text-2xl font-bold text-gray-800">{stats.users}</p>
+                  <p className="text-gray-500 text-sm">משתמשים</p>
                 </div>
               </div>
             </div>
@@ -208,142 +294,257 @@ export default function Dashboard() {
       </div>
 
       {/* Tabs */}
-      {isAdmin && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6">
-          <div className="flex gap-2 border-b border-gray-200 pb-4">
-            <button onClick={() => setActiveTab('servers')} className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${activeTab === 'servers' ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2" /></svg>
-              שרתים
-            </button>
-            <button onClick={() => setActiveTab('users')} className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${activeTab === 'users' ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex gap-2 border-b border-gray-200 pb-4 overflow-x-auto">
+          <button onClick={() => setActiveTab('servers')} className={`px-5 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'servers' ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2" /></svg>
+            שרתים
+          </button>
+          {isAdmin && (
+            <button onClick={() => setActiveTab('users')} className={`px-5 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'users' ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
               משתמשים
             </button>
-          </div>
+          )}
+          <button onClick={() => setActiveTab('api')} className={`px-5 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'api' ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+            API
+          </button>
+          <button onClick={() => setActiveTab('settings')} className={`px-5 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'settings' ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-200' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            הגדרות
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {activeTab === 'servers' ? (
+        {activeTab === 'servers' && (
           <>
             {canEdit && (
-              <button onClick={() => { setEditingServer(null); setServerForm({ name: '', mainIp: '', proxyIps: '' }); setShowServerModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all transform hover:scale-[1.02]">
+              <button onClick={() => { setEditingServer(null); setServerForm({ name: '', mainIp: '', proxyIps: '' }); setShowServerModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                 הוסף שרת חדש
               </button>
             )}
 
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-6">
               {servers.map(server => (
-                <div key={server.id} className="group bg-white rounded-2xl border border-gray-100 shadow-lg shadow-gray-100 hover:shadow-xl hover:shadow-indigo-100 transition-all duration-300 overflow-hidden">
-                  <div className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800 group-hover:text-indigo-600 transition">{server.name}</h3>
-                        <p className="text-sm text-gray-500 font-mono mt-1 bg-gray-100 px-2 py-1 rounded-lg inline-block">{server.main_ip}</p>
+                <div key={server.id} className="bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden">
+                  <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl flex items-center justify-center">
+                        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2" />
+                        </svg>
                       </div>
-                      <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full">
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <span className="text-xs text-green-600 font-medium">פעיל</span>
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-800">{server.name}</h3>
+                        <p className="text-sm text-gray-500 font-mono">{server.main_ip}</p>
                       </div>
                     </div>
-
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <p className="text-sm font-medium text-gray-600">כתובות פרוקסי</p>
-                        <span className="px-2.5 py-1 text-xs bg-indigo-100 text-indigo-600 rounded-full font-semibold">{server.proxyIps?.length || 0}</span>
-                      </div>
-                      <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar">
-                        {server.proxyIps?.map(proxy => (
-                          <div key={proxy.id} className="flex justify-between items-center text-sm bg-gray-50 hover:bg-indigo-50 rounded-xl px-4 py-2.5 transition">
-                            <span className="text-gray-700 font-mono">{proxy.ip}</span>
-                            <span className="text-indigo-500 font-semibold">:{proxy.port}</span>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleShowScript(server)} className="px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium text-sm transition">סקריפט</button>
+                      {canEdit && (
+                        <>
+                          <button onClick={() => openEditServer(server)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          </button>
+                          <button onClick={() => handleDeleteServer(server.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex border-t border-gray-100 bg-gray-50/50">
-                    <button onClick={() => handleShowScript(server)} className="flex-1 px-4 py-3.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 transition flex items-center justify-center gap-2">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
-                      סקריפט
-                    </button>
-                    {canEdit && (
-                      <>
-                        <button onClick={() => openEditServer(server)} className="px-4 py-3.5 text-sm text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition border-r border-gray-100">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        </button>
-                        <button onClick={() => handleDeleteServer(server.id)} className="px-4 py-3.5 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 transition">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                        </button>
-                      </>
-                    )}
+                  
+                  <div className="p-6">
+                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                      {server.proxyIps?.map(proxy => (
+                        <div key={proxy.id} className="bg-gray-50 rounded-xl p-4 hover:bg-indigo-50 transition group">
+                          <div className="flex items-center justify-between mb-3">
+                            <button 
+                              onClick={() => copyToClipboard(`${proxy.ip}:${proxy.port}`, `proxy-${proxy.id}`)}
+                              className="flex items-center gap-2 font-mono text-gray-800 hover:text-indigo-600 transition"
+                            >
+                              <span className="font-semibold">{proxy.ip}:{proxy.port}</span>
+                              {copied === `proxy-${proxy.id}` ? (
+                                <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                              ) : (
+                                <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                              )}
+                            </button>
+                            <span className={`px-2 py-1 text-xs rounded-full ${proxy.phones?.length >= settings.maxPhonesPerProxy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                              {proxy.phones?.length || 0}/{settings.maxPhonesPerProxy}
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-1 mb-3">
+                            {proxy.phones?.slice(0, 3).map(phone => (
+                              <div key={phone.id} className="flex items-center justify-between text-sm bg-white rounded-lg px-3 py-1.5">
+                                <span className="text-gray-600">{phone.phone}</span>
+                                {canEdit && (
+                                  <button onClick={() => handleRemovePhone(phone.id)} className="text-red-400 hover:text-red-600">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            {proxy.phones?.length > 3 && (
+                              <p className="text-xs text-gray-500 text-center">+{proxy.phones.length - 3} נוספים</p>
+                            )}
+                          </div>
+                          
+                          {canEdit && (
+                            <button onClick={() => { setSelectedProxy(proxy); setShowPhoneModal(true); }} className="w-full py-2 text-sm text-indigo-600 hover:bg-indigo-100 rounded-lg transition">
+                              + הוסף טלפון
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ))}
 
               {servers.length === 0 && (
-                <div className="col-span-full text-center py-20">
+                <div className="text-center py-20 bg-white rounded-2xl">
                   <div className="w-24 h-24 bg-gray-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
                     <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2" />
                     </svg>
                   </div>
                   <p className="text-gray-500 text-xl font-medium">אין שרתים עדיין</p>
-                  {canEdit && <p className="text-gray-400 mt-2">לחץ על "הוסף שרת חדש" להתחלה</p>}
                 </div>
               )}
             </div>
           </>
-        ) : (
+        )}
+
+        {activeTab === 'users' && isAdmin && (
           <>
-            <button onClick={() => { setUserForm({ email: '', name: '', role: 'viewer', parentId: '' }); setNewUserPassword(''); setShowUserModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-purple-200 hover:shadow-xl hover:shadow-purple-300 transition-all transform hover:scale-[1.02]">
+            <button onClick={() => { setUserForm({ email: '', name: '', role: 'viewer', parentId: '' }); setNewUserPassword(''); setShowUserModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-purple-200">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
               הוסף משתמש
             </button>
 
             <div className="bg-white rounded-2xl border border-gray-100 shadow-lg overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">אימייל</th>
-                      <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">שם</th>
-                      <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">תפקיד</th>
-                      <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">פעולות</th>
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">אימייל</th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">שם</th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">תפקיד</th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">פעולות</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {users.map(u => (
+                    <tr key={u.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 text-gray-700 font-mono text-sm">{u.email}</td>
+                      <td className="px-6 py-4 text-gray-700">{u.name || '-'}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-3 py-1.5 text-xs rounded-full font-semibold ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : u.role === 'editor' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                          {u.role === 'admin' ? 'מנהל' : u.role === 'editor' ? 'עורך' : 'צופה'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <button onClick={() => handleDeleteUser(u.id)} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg">מחק</button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {users.map(u => (
-                      <tr key={u.id} className="hover:bg-indigo-50/50 transition">
-                        <td className="px-6 py-4 text-gray-700 font-mono text-sm">{u.email}</td>
-                        <td className="px-6 py-4 text-gray-700">{u.name || '-'}</td>
-                        <td className="px-6 py-4">
-                          <span className={`px-3 py-1.5 text-xs rounded-full font-semibold ${
-                            u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 
-                            u.role === 'editor' ? 'bg-blue-100 text-blue-700' : 
-                            'bg-gray-100 text-gray-600'
-                          }`}>
-                            {u.role === 'admin' ? 'מנהל' : u.role === 'editor' ? 'עורך' : 'צופה'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <button onClick={() => handleDeleteUser(u.id)} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg transition font-medium">מחק</button>
-                        </td>
-                      </tr>
-                    ))}
-                    {users.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="px-6 py-16 text-center text-gray-400">אין משתמשים נוספים</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </>
+        )}
+
+        {activeTab === 'api' && (
+          <div className="space-y-8">
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-bold text-gray-800">מפתחות API</h3>
+                <button onClick={() => { setNewApiKeyName(''); setNewApiKey(''); setShowApiKeyModal(true); }} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium text-sm">
+                  + צור מפתח חדש
+                </button>
+              </div>
+              
+              <div className="space-y-3">
+                {apiKeys.map(key => (
+                  <div key={key.id} className="flex items-center justify-between bg-gray-50 rounded-xl p-4">
+                    <div>
+                      <p className="font-medium text-gray-800">{key.name}</p>
+                      <p className="font-mono text-sm text-gray-500">{key.key}</p>
+                    </div>
+                    <button onClick={() => handleDeleteApiKey(key.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg">מחק</button>
+                  </div>
+                ))}
+                {apiKeys.length === 0 && (
+                  <p className="text-center text-gray-500 py-8">אין מפתחות API</p>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
+              <h3 className="text-lg font-bold text-gray-800 mb-4">תיעוד API</h3>
+              <div className="space-y-4 text-sm">
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="font-semibold text-gray-700 mb-2">שיוך טלפון לפרוקסי</p>
+                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
+                    POST /api/v1/phone/assign<br/>
+                    Headers: X-API-Key: your-api-key<br/>
+                    Body: {`{ "phone": "0501234567", "proxyIp": "1.2.3.4", "port": 8080 }`}
+                  </code>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="font-semibold text-gray-700 mb-2">הסרת שיוך טלפון</p>
+                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
+                    POST /api/v1/phone/remove<br/>
+                    Headers: X-API-Key: your-api-key<br/>
+                    Body: {`{ "phone": "0501234567", "proxyIp": "1.2.3.4" }`}
+                  </code>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="font-semibold text-gray-700 mb-2">קבלת פרוקסי פנויים</p>
+                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
+                    GET /api/v1/proxies/available<br/>
+                    Headers: X-API-Key: your-api-key
+                  </code>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <p className="font-semibold text-gray-700 mb-2">קבלת כל הפרוקסי</p>
+                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
+                    GET /api/v1/proxies/all<br/>
+                    Headers: X-API-Key: your-api-key
+                  </code>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6 max-w-xl">
+            <h3 className="text-lg font-bold text-gray-800 mb-6">הגדרות מערכת</h3>
+            
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">מספר טלפונים מקסימלי לפרוקסי (פנוי)</label>
+                <p className="text-sm text-gray-500 mb-3">פרוקסי ייחשב "פנוי" אם יש לו פחות ממספר זה של טלפונים משויכים</p>
+                <input 
+                  type="number" 
+                  min="1" 
+                  value={settings.maxPhonesPerProxy} 
+                  onChange={(e) => setSettings({ ...settings, maxPhonesPerProxy: parseInt(e.target.value) || 3 })}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              
+              <button onClick={handleSaveSettings} className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200">
+                שמור הגדרות
+              </button>
+            </div>
+          </div>
         )}
       </main>
 
@@ -353,26 +554,23 @@ export default function Dashboard() {
           <div className="bg-white rounded-3xl border border-gray-200 w-full max-w-lg shadow-2xl">
             <div className="p-6 border-b border-gray-100">
               <h2 className="text-2xl font-bold text-gray-800">{editingServer ? 'עריכת שרת' : 'הוספת שרת חדש'}</h2>
-              <p className="text-gray-500 mt-1">הגדר את פרטי השרת וכתובות ה-IP</p>
             </div>
             <form onSubmit={handleSaveServer} className="p-6 space-y-5">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">שם השרת</label>
-                <input type="text" value={serverForm.name} onChange={(e) => setServerForm({ ...serverForm, name: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition" placeholder="לדוגמה: שרת ראשי" required />
+                <input type="text" value={serverForm.name} onChange={(e) => setServerForm({ ...serverForm, name: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-indigo-500" required />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">כתובת IP ראשית</label>
-                <input type="text" value={serverForm.mainIp} onChange={(e) => setServerForm({ ...serverForm, mainIp: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition" placeholder="192.168.1.1" required />
+                <input type="text" value={serverForm.mainIp} onChange={(e) => setServerForm({ ...serverForm, mainIp: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono focus:ring-2 focus:ring-indigo-500" required />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">כתובות IP לפרוקסי (שורה לכל כתובת)</label>
-                <textarea value={serverForm.proxyIps} onChange={(e) => setServerForm({ ...serverForm, proxyIps: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono h-36 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition resize-none" placeholder="192.168.1.2&#10;192.168.1.3&#10;192.168.1.4" required />
+                <textarea value={serverForm.proxyIps} onChange={(e) => setServerForm({ ...serverForm, proxyIps: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono h-36 focus:ring-2 focus:ring-indigo-500 resize-none" required />
               </div>
               <div className="flex gap-3 pt-4">
-                <button type="submit" className="flex-1 py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-semibold rounded-xl shadow-lg shadow-indigo-200 transition transform hover:scale-[1.02]">
-                  {editingServer ? 'עדכן שרת' : 'הוסף שרת'}
-                </button>
-                <button type="button" onClick={() => setShowServerModal(false)} className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition">ביטול</button>
+                <button type="submit" className="flex-1 py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold rounded-xl shadow-lg">{editingServer ? 'עדכן' : 'הוסף'}</button>
+                <button type="button" onClick={() => setShowServerModal(false)} className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">ביטול</button>
               </div>
             </form>
           </div>
@@ -385,60 +583,105 @@ export default function Dashboard() {
           <div className="bg-white rounded-3xl border border-gray-200 w-full max-w-lg shadow-2xl">
             <div className="p-6 border-b border-gray-100">
               <h2 className="text-2xl font-bold text-gray-800">הוספת משתמש</h2>
-              <p className="text-gray-500 mt-1">הזמן משתמש חדש למערכת</p>
             </div>
             {newUserPassword ? (
               <div className="p-6">
-                <div className="bg-green-50 border border-green-200 rounded-2xl p-6 mb-6">
-                  <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                      <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-green-700 font-bold text-lg">משתמש נוצר בהצלחה!</p>
-                      <p className="text-green-600 text-sm">שלח את הסיסמה למשתמש</p>
-                    </div>
-                  </div>
+                <div className="bg-green-50 border border-green-200 rounded-2xl p-5 mb-6">
+                  <p className="text-green-700 font-bold text-lg mb-2">משתמש נוצר!</p>
                   <p className="text-gray-600 text-sm mb-2">סיסמה זמנית:</p>
-                  <div className="flex items-center gap-2">
-                    <code className="flex-1 font-mono text-lg text-gray-800 bg-white rounded-xl px-4 py-3 border border-gray-200">{newUserPassword}</code>
-                    <button onClick={() => navigator.clipboard.writeText(newUserPassword)} className="px-4 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl transition">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                    </button>
-                  </div>
+                  <code className="block font-mono text-lg text-gray-800 bg-white rounded-xl px-4 py-3 border">{newUserPassword}</code>
                 </div>
-                <button onClick={() => { setShowUserModal(false); setNewUserPassword(''); }} className="w-full py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold rounded-xl transition">סגור</button>
+                <button onClick={() => { setShowUserModal(false); setNewUserPassword(''); }} className="w-full py-3.5 bg-indigo-500 text-white font-semibold rounded-xl">סגור</button>
               </div>
             ) : (
               <form onSubmit={handleCreateUser} className="p-6 space-y-5">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">אימייל</label>
-                  <input type="email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition" required />
+                  <input type="email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl" required />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">שם (אופציונלי)</label>
-                  <input type="text" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition" />
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">שם</label>
+                  <input type="text" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">תפקיד</label>
-                  <select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition">
-                    <option value="viewer">צופה - צפייה בלבד</option>
-                    <option value="editor">עורך - יכול להוסיף ולערוך שרתים</option>
-                    <option value="admin">מנהל - גישה מלאה</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">הצגת נתונים</label>
-                  <select value={userForm.parentId} onChange={(e) => setUserForm({ ...userForm, parentId: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-purple-500 focus:border-transparent transition">
-                    <option value="">נתונים עצמאיים - יראה רק שרתים שלו</option>
-                    <option value={user?.id}>שיתוף - יראה את השרתים שלי</option>
+                  <select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl">
+                    <option value="viewer">צופה</option>
+                    <option value="editor">עורך</option>
+                    <option value="admin">מנהל</option>
                   </select>
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <button type="submit" className="flex-1 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold rounded-xl shadow-lg shadow-purple-200 transition transform hover:scale-[1.02]">צור משתמש</button>
-                  <button type="button" onClick={() => setShowUserModal(false)} className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition">ביטול</button>
+                  <button type="submit" className="flex-1 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl shadow-lg">צור</button>
+                  <button type="button" onClick={() => setShowUserModal(false)} className="px-6 py-3.5 bg-gray-100 text-gray-700 font-semibold rounded-xl">ביטול</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Phone Modal */}
+      {showPhoneModal && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl border border-gray-200 w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-800">ניהול טלפונים</h2>
+              <p className="text-gray-500 font-mono">{selectedProxy?.ip}:{selectedProxy?.port}</p>
+            </div>
+            <div className="p-6">
+              <form onSubmit={handleAddPhone} className="flex gap-2 mb-4">
+                <input type="text" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="מספר טלפון" className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl" required />
+                <button type="submit" className="px-4 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium">הוסף</button>
+              </form>
+              
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {servers.flatMap(s => s.proxyIps).find(p => p.id === selectedProxy?.id)?.phones?.map(phone => (
+                  <div key={phone.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                    <span className="text-gray-700">{phone.phone}</span>
+                    <button onClick={() => handleRemovePhone(phone.id)} className="text-red-500 hover:text-red-700">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-100">
+              <button onClick={() => setShowPhoneModal(false)} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* API Key Modal */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl border border-gray-200 w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-800">יצירת מפתח API</h2>
+            </div>
+            {newApiKey ? (
+              <div className="p-6">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-4">
+                  <p className="text-yellow-700 font-semibold mb-2">שמור את המפתח! לא תוכל לראות אותו שוב.</p>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-4 mb-6">
+                  <p className="font-mono text-sm break-all">{newApiKey}</p>
+                </div>
+                <button onClick={() => copyToClipboard(newApiKey, 'new-api-key')} className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-xl mb-3">
+                  {copied === 'new-api-key' ? 'הועתק!' : 'העתק מפתח'}
+                </button>
+                <button onClick={() => { setShowApiKeyModal(false); setNewApiKey(''); }} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
+              </div>
+            ) : (
+              <form onSubmit={handleCreateApiKey} className="p-6 space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">שם המפתח</label>
+                  <input type="text" value={newApiKeyName} onChange={(e) => setNewApiKeyName(e.target.value)} placeholder="לדוגמה: Production API" className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl" />
+                </div>
+                <div className="flex gap-3">
+                  <button type="submit" className="flex-1 py-3.5 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-xl">צור מפתח</button>
+                  <button type="button" onClick={() => setShowApiKeyModal(false)} className="px-6 py-3.5 bg-gray-100 text-gray-700 font-semibold rounded-xl">ביטול</button>
                 </div>
               </form>
             )}
@@ -456,50 +699,21 @@ export default function Dashboard() {
                 <p className="text-gray-500 mt-1">{selectedServer?.name}</p>
               </div>
               <div className="flex gap-2">
-                <button onClick={copyScript} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition flex items-center gap-2 ${copied ? 'bg-green-100 text-green-700' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>
-                  {copied ? (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                      הועתק!
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
-                      העתק
-                    </>
-                  )}
+                <button onClick={() => copyToClipboard(script, 'script')} className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${copied === 'script' ? 'bg-green-100 text-green-700' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}>
+                  {copied === 'script' ? 'הועתק!' : 'העתק'}
                 </button>
-                <button onClick={downloadScript} className="px-5 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-xl transition flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                  הורד
-                </button>
+                <button onClick={downloadScript} className="px-5 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-xl">הורד</button>
               </div>
             </div>
             <div className="flex-1 overflow-auto p-6">
               <pre className="text-sm text-gray-700 font-mono whitespace-pre-wrap bg-gray-50 rounded-2xl p-6 border border-gray-200" dir="ltr">{script}</pre>
             </div>
             <div className="p-4 border-t border-gray-100">
-              <button onClick={() => setShowScriptModal(false)} className="w-full py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition">סגור</button>
+              <button onClick={() => setShowScriptModal(false)} className="w-full py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
             </div>
           </div>
         </div>
       )}
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #d1d5db;
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #9ca3af;
-        }
-      `}</style>
     </div>
   );
 }

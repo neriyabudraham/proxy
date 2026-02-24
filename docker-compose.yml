@@ -15,9 +15,10 @@ services:
       - CLIENT_URL=${CLIENT_URL}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - DATABASE_PATH=/app/data/proxy.db
-    volumes:
-      - proxy-data:/app/data
-
-volumes:
-  proxy-data:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
