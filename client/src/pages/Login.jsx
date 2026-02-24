@@ -20,13 +20,16 @@ export default function Login() {
     if (user) navigate('/dashboard');
     checkSetup();
     loadGoogleClientId();
-  }, [user]);
-
-  useEffect(() => {
-    if (googleClientId && !needsSetup) {
-      loadGoogleScript();
+    
+    // Check for error from Google callback
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get('error');
+    if (errorParam === 'unauthorized') {
+      setError('המשתמש לא מורשה להתחבר למערכת');
+    } else if (errorParam) {
+      setError('שגיאה בהתחברות עם Google');
     }
-  }, [googleClientId, needsSetup]);
+  }, [user]);
 
   const loadGoogleClientId = async () => {
     const res = await fetch('/api/auth/google-client-id');
@@ -34,55 +37,8 @@ export default function Login() {
     setGoogleClientId(data.clientId);
   };
 
-  const loadGoogleScript = () => {
-    if (document.getElementById('google-script')) return;
-    
-    const script = document.createElement('script');
-    script.id = 'google-script';
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = initGoogle;
-    document.body.appendChild(script);
-  };
-
-  const initGoogle = () => {
-    if (!window.google || !googleClientId) return;
-    
-    window.google.accounts.id.initialize({
-      client_id: googleClientId,
-      callback: handleGoogleCallback
-    });
-  };
-
   const handleGoogleLogin = () => {
-    if (window.google) {
-      window.google.accounts.id.prompt();
-    }
-  };
-
-  const handleGoogleCallback = async (response) => {
-    setLoading(true);
-    setError('');
-    
-    try {
-      const res = await fetch('/api/auth/google', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ credential: response.credential })
-      });
-      
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Google login failed');
-      }
-      
-      window.location.href = '/dashboard';
-    } catch (err) {
-      setError(err.message);
-    }
-    setLoading(false);
+    window.location.href = '/api/auth/google/redirect';
   };
 
   const checkSetup = async () => {

@@ -179,4 +179,82 @@ router.get('/google-client-id', (req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || '' });
 });
 
+router.get('/google/redirect', (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const redirectUri = `${process.env.CLIENT_URL}/api/auth/callback/google`;
+  const scope = 'openid email profile';
+  
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${clientId}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&response_type=code` +
+    `&scope=${encodeURIComponent(scope)}` +
+    `&access_type=offline` +
+    `&prompt=select_account`;
+  
+  res.redirect(authUrl);
+});
+
+router.get('/callback/google', async (req, res) => {
+  const { code } = req.query;
+  
+  if (!code) {
+    return res.redirect('/login?error=no_code');
+  }
+  
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: `${process.env.CLIENT_URL}/api/auth/callback/google`,
+        grant_type: 'authorization_code'
+      })
+    });
+    
+    const tokens = await tokenRes.json();
+    
+    if (!tokens.id_token) {
+      return res.redirect('/login?error=no_token');
+    }
+    
+    const ticket = await googleClient.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+    
+    const payload = ticket.getPayload();
+    const email = payload.email;
+    
+    let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    
+    if (!user) {
+      if (email === ADMIN_EMAIL) {
+        db.prepare('INSERT INTO users (email, name, role, password_setup) VALUES (?, ?, ?, 1)')
+          .run(email, payload.name, 'admin');
+        user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+      } else {
+        return res.redirect('/login?error=unauthorized');
+      }
+    }
+    
+    const token = generateToken(user);
+    
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    
+    res.redirect('/dashboard');
+  } catch (error) {
+    console.error('Google callback error:', error);
+    res.redirect('/login?error=auth_failed');
+  }
+});
+
 export default router;
