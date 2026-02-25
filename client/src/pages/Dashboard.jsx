@@ -595,22 +595,35 @@ export default function Dashboard() {
               <div className="space-y-6">
                 <div className="bg-gray-50 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="font-semibold text-gray-700">שיוך טלפון לפרוקסי</p>
+                    <p className="font-semibold text-gray-700">שיוך טלפון לפרוקסי ספציפי</p>
                     <button onClick={() => copyToClipboard(getCurlExample('/phone/assign', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4", port: 8080 }), 'curl-assign')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-assign' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
                       {copied === 'curl-assign' ? 'הועתק!' : 'העתק'}
                     </button>
                   </div>
                   <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/phone/assign', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4", port: 8080 })}</pre>
+                  <p className="text-xs text-gray-500 mt-2">* מספר טלפון ישראלי ינורמל אוטומטית לפורמט 972XXXXXXXXX</p>
+                </div>
+
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-gray-700">שיוך טלפון אוטומטי (לפרוקסי פנוי)</p>
+                    <button onClick={() => copyToClipboard(getCurlExample('/phone/assign', 'POST', { phone: "0501234567" }), 'curl-assign-auto')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-assign-auto' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                      {copied === 'curl-assign-auto' ? 'הועתק!' : 'העתק'}
+                    </button>
+                  </div>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/phone/assign', 'POST', { phone: "0501234567" })}</pre>
+                  <p className="text-xs text-gray-500 mt-2">* ללא proxyIp - ישויך אוטומטית לפרוקסי הפנוי ביותר</p>
                 </div>
 
                 <div className="bg-gray-50 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2">
                     <p className="font-semibold text-gray-700">הסרת שיוך טלפון</p>
-                    <button onClick={() => copyToClipboard(getCurlExample('/phone/remove', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4" }), 'curl-remove')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-remove' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                    <button onClick={() => copyToClipboard(getCurlExample('/phone/remove', 'POST', { phone: "0501234567" }), 'curl-remove')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-remove' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
                       {copied === 'curl-remove' ? 'הועתק!' : 'העתק'}
                     </button>
                   </div>
-                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/phone/remove', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4" })}</pre>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/phone/remove', 'POST', { phone: "0501234567" })}</pre>
+                  <p className="text-xs text-gray-500 mt-2">* מספיק להזין רק את מספר הטלפון להסרה מכל הפרוקסי</p>
                 </div>
 
                 <div className="bg-gray-50 rounded-xl p-4">

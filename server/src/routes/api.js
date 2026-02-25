@@ -120,46 +120,131 @@ router.put('/settings', authMiddleware, async (req, res) => {
   res.json({ success: true });
 });
 
+// Normalize phone number
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  
+  // Remove all non-digit characters except leading +
+  let cleaned = phone.replace(/[^\d+]/g, '');
+  
+  // Check if it's an Israeli number
+  const isIsraeli = (
+    cleaned.startsWith('+972') ||
+    cleaned.startsWith('972') ||
+    cleaned.startsWith('05') ||
+    cleaned.startsWith('02') ||
+    cleaned.startsWith('03') ||
+    cleaned.startsWith('04') ||
+    cleaned.startsWith('07') ||
+    cleaned.startsWith('08') ||
+    cleaned.startsWith('09')
+  );
+  
+  if (isIsraeli) {
+    // Remove + if exists
+    cleaned = cleaned.replace(/^\+/, '');
+    
+    // If starts with 0, replace with 972
+    if (cleaned.startsWith('0')) {
+      cleaned = '972' + cleaned.substring(1);
+    }
+    
+    // If doesn't start with 972, add it
+    if (!cleaned.startsWith('972')) {
+      cleaned = '972' + cleaned;
+    }
+  } else {
+    // For non-Israeli numbers, just clean (remove + and spaces)
+    cleaned = cleaned.replace(/^\+/, '');
+  }
+  
+  return cleaned;
+}
+
+// Helper to get available proxy
+async function getAvailableProxy(userId) {
+  const setting = await db.queryOne(
+    "SELECT value FROM settings WHERE user_id = $1 AND key = 'maxPhonesPerProxy'",
+    [userId]
+  );
+  const maxPhones = setting ? parseInt(setting.value) : 3;
+  
+  const proxy = await db.queryOne(
+    `SELECT p.id, p.ip, p.port FROM proxy_ips p
+     JOIN servers s ON p.server_id = s.id
+     WHERE s.user_id = $1
+     AND (SELECT COUNT(*) FROM phone_numbers WHERE proxy_id = p.id) < $2
+     ORDER BY (SELECT COUNT(*) FROM phone_numbers WHERE proxy_id = p.id) ASC
+     LIMIT 1`,
+    [userId, maxPhones]
+  );
+  
+  return proxy;
+}
+
 // External API endpoints (requires API key)
 router.post('/phone/assign', apiKeyAuth, async (req, res) => {
   const { phone, proxyIp, port } = req.body;
   
-  if (!phone || !proxyIp) {
-    return res.status(400).json({ error: 'phone and proxyIp are required' });
+  if (!phone) {
+    return res.status(400).json({ error: 'phone is required' });
   }
   
-  // Find the proxy by IP (and port if provided)
-  let query = `
-    SELECT p.* FROM proxy_ips p
-    JOIN servers s ON p.server_id = s.id
-    WHERE p.ip = $1 AND s.user_id = $2
-  `;
-  let params = [proxyIp, req.apiUserId];
+  const normalizedPhone = normalizePhone(phone);
+  let proxy;
   
-  if (port) {
-    query += ' AND p.port = $3';
-    params.push(port);
-  }
-  
-  const proxy = await db.queryOne(query, params);
-  
-  if (!proxy) {
-    return res.status(404).json({ error: 'Proxy not found' });
+  if (proxyIp) {
+    // Find specific proxy
+    let query = `
+      SELECT p.* FROM proxy_ips p
+      JOIN servers s ON p.server_id = s.id
+      WHERE p.ip = $1 AND s.user_id = $2
+    `;
+    let params = [proxyIp, req.apiUserId];
+    
+    if (port) {
+      query += ' AND p.port = $3';
+      params.push(port);
+    }
+    
+    proxy = await db.queryOne(query, params);
+    
+    if (!proxy) {
+      return res.status(404).json({ error: 'Proxy not found' });
+    }
+  } else {
+    // Auto-assign to available proxy
+    proxy = await getAvailableProxy(req.apiUserId);
+    
+    if (!proxy) {
+      return res.status(400).json({ error: 'No available proxy found' });
+    }
   }
   
   // Check if phone already assigned to this proxy
   const existing = await db.queryOne(
     'SELECT * FROM phone_numbers WHERE phone = $1 AND proxy_id = $2',
-    [phone, proxy.id]
+    [normalizedPhone, proxy.id]
   );
   
   if (existing) {
-    return res.json({ success: true, message: 'Phone already assigned', proxyId: proxy.id });
+    return res.json({ 
+      success: true, 
+      message: 'Phone already assigned', 
+      proxyId: proxy.id,
+      proxy: `${proxy.ip}:${proxy.port}`,
+      phone: normalizedPhone
+    });
   }
   
-  await db.execute('INSERT INTO phone_numbers (phone, proxy_id) VALUES ($1, $2)', [phone, proxy.id]);
+  await db.execute('INSERT INTO phone_numbers (phone, proxy_id) VALUES ($1, $2)', [normalizedPhone, proxy.id]);
   
-  res.json({ success: true, proxyId: proxy.id });
+  res.json({ 
+    success: true, 
+    proxyId: proxy.id,
+    proxy: `${proxy.ip}:${proxy.port}`,
+    phone: normalizedPhone
+  });
 });
 
 router.post('/phone/remove', apiKeyAuth, async (req, res) => {
@@ -168,6 +253,8 @@ router.post('/phone/remove', apiKeyAuth, async (req, res) => {
   if (!phone) {
     return res.status(400).json({ error: 'phone is required' });
   }
+  
+  const normalizedPhone = normalizePhone(phone);
   
   if (proxyIp) {
     // Remove from specific proxy
@@ -179,7 +266,7 @@ router.post('/phone/remove', apiKeyAuth, async (req, res) => {
     );
     
     if (proxy) {
-      await db.execute('DELETE FROM phone_numbers WHERE phone = $1 AND proxy_id = $2', [phone, proxy.id]);
+      await db.execute('DELETE FROM phone_numbers WHERE phone = $1 AND proxy_id = $2', [normalizedPhone, proxy.id]);
     }
   } else {
     // Remove from all proxies owned by this user
@@ -189,11 +276,11 @@ router.post('/phone/remove', apiKeyAuth, async (req, res) => {
         JOIN servers s ON p.server_id = s.id
         WHERE s.user_id = $2
       )`,
-      [phone, req.apiUserId]
+      [normalizedPhone, req.apiUserId]
     );
   }
   
-  res.json({ success: true });
+  res.json({ success: true, phone: normalizedPhone });
 });
 
 router.get('/proxies/available', apiKeyAuth, async (req, res) => {

@@ -160,6 +160,39 @@ router.delete('/:serverId/proxies/:proxyId', async (req, res) => {
   res.json({ success: true });
 });
 
+// Normalize phone number
+function normalizePhone(phone) {
+  if (!phone) return phone;
+  
+  let cleaned = phone.replace(/[^\d+]/g, '');
+  
+  const isIsraeli = (
+    cleaned.startsWith('+972') ||
+    cleaned.startsWith('972') ||
+    cleaned.startsWith('05') ||
+    cleaned.startsWith('02') ||
+    cleaned.startsWith('03') ||
+    cleaned.startsWith('04') ||
+    cleaned.startsWith('07') ||
+    cleaned.startsWith('08') ||
+    cleaned.startsWith('09')
+  );
+  
+  if (isIsraeli) {
+    cleaned = cleaned.replace(/^\+/, '');
+    if (cleaned.startsWith('0')) {
+      cleaned = '972' + cleaned.substring(1);
+    }
+    if (!cleaned.startsWith('972')) {
+      cleaned = '972' + cleaned;
+    }
+  } else {
+    cleaned = cleaned.replace(/^\+/, '');
+  }
+  
+  return cleaned;
+}
+
 // Phone number management
 router.post('/proxy/:proxyId/phones', async (req, res) => {
   if (req.user.role === 'viewer') {
@@ -168,10 +201,11 @@ router.post('/proxy/:proxyId/phones', async (req, res) => {
   
   const { proxyId } = req.params;
   const { phone } = req.body;
+  const normalizedPhone = normalizePhone(phone);
   
   await db.execute(
     'INSERT INTO phone_numbers (phone, proxy_id) VALUES ($1, $2)',
-    [phone, proxyId]
+    [normalizedPhone, proxyId]
   );
   
   const phones = await db.query('SELECT * FROM phone_numbers WHERE proxy_id = $1', [proxyId]);
