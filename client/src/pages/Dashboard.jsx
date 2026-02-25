@@ -850,10 +850,17 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex-1 overflow-auto p-6">
-              <pre className="text-sm text-gray-700 font-mono whitespace-pre-wrap bg-gray-50 rounded-2xl p-6 border border-gray-200" dir="ltr">{script}</pre>
+              <textarea 
+                value={script} 
+                onChange={(e) => setScript(e.target.value)}
+                className="w-full h-full min-h-[400px] text-sm text-gray-700 font-mono bg-gray-50 rounded-2xl p-6 border border-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                dir="ltr"
+                spellCheck={false}
+              />
             </div>
-            <div className="p-4 border-t border-gray-100">
-              <button onClick={() => setShowScriptModal(false)} className="w-full py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
+            <div className="p-4 border-t border-gray-100 flex gap-3">
+              <button onClick={() => handleShowScript(selectedServer)} className="px-6 py-3.5 bg-orange-100 hover:bg-orange-200 text-orange-700 font-semibold rounded-xl">איפוס</button>
+              <button onClick={() => setShowScriptModal(false)} className="flex-1 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
             </div>
           </div>
         </div>
