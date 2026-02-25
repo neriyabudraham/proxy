@@ -112,14 +112,25 @@ export default function Dashboard() {
 
   const handleShowScript = async (server) => {
     setSelectedServer(server);
-    const res = await fetch(`/api/servers/${server.id}/script`, { credentials: 'include' });
-    if (res.ok) {
-      const text = await res.text();
-      setScript(text);
-      setShowScriptModal(true);
-    } else {
-      const data = await res.json();
-      alert(data.error || 'שגיאה בהבאת הסקריפט');
+    try {
+      const res = await fetch(`/api/servers/${server.id}/script`, { credentials: 'include' });
+      const contentType = res.headers.get('content-type');
+      
+      if (res.ok) {
+        const text = await res.text();
+        setScript(text);
+        setShowScriptModal(true);
+      } else {
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json();
+          alert(data.error || 'שגיאה בהבאת הסקריפט');
+        } else {
+          alert('שגיאה בהבאת הסקריפט - אין כתובות פרוקסי מוגדרות?');
+        }
+      }
+    } catch (err) {
+      console.error('Script fetch error:', err);
+      alert('שגיאה בהבאת הסקריפט');
     }
   };
 

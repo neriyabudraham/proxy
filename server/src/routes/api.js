@@ -25,19 +25,31 @@ async function apiKeyAuth(req, res, next) {
 
 // API Key management (requires auth)
 router.get('/keys', authMiddleware, async (req, res) => {
+  // Viewers can't see API keys
+  if (req.user.role === 'viewer') {
+    return res.json([]);
+  }
+  
+  // Editors see parent's keys, admins see their own
+  const userId = req.user.parentId ? req.user.parentId : req.user.id;
+  
   const keys = await db.query(
     'SELECT id, name, key, created_at FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC',
-    [req.user.id]
+    [userId]
   );
   
-  // Return full keys
   res.json(keys);
 });
 
 router.get('/keys/:id', authMiddleware, async (req, res) => {
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  const userId = req.user.parentId ? req.user.parentId : req.user.id;
   const key = await db.queryOne(
     'SELECT id, name, key, created_at FROM api_keys WHERE id = $1 AND user_id = $2',
-    [req.params.id, req.user.id]
+    [req.params.id, userId]
   );
   
   if (!key) {
@@ -48,6 +60,11 @@ router.get('/keys/:id', authMiddleware, async (req, res) => {
 });
 
 router.post('/keys', authMiddleware, async (req, res) => {
+  // Only admins can create API keys
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can create API keys' });
+  }
+  
   const { name } = req.body;
   const key = 'pk_' + crypto.randomBytes(32).toString('hex');
   
@@ -60,13 +77,20 @@ router.post('/keys', authMiddleware, async (req, res) => {
 });
 
 router.delete('/keys/:id', authMiddleware, async (req, res) => {
+  // Only admins can delete API keys
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can delete API keys' });
+  }
+  
   await db.execute('DELETE FROM api_keys WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
   res.json({ success: true });
 });
 
 // Settings management (requires auth)
 router.get('/settings', authMiddleware, async (req, res) => {
-  const settings = await db.query('SELECT key, value FROM settings WHERE user_id = $1', [req.user.id]);
+  // Use parent's settings for editors/viewers
+  const userId = req.user.parentId ? req.user.parentId : req.user.id;
+  const settings = await db.query('SELECT key, value FROM settings WHERE user_id = $1', [userId]);
   
   const settingsObj = {
     maxPhonesPerProxy: 3 // default
@@ -80,6 +104,11 @@ router.get('/settings', authMiddleware, async (req, res) => {
 });
 
 router.put('/settings', authMiddleware, async (req, res) => {
+  // Only admins can change settings
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can change settings' });
+  }
+  
   const { maxPhonesPerProxy } = req.body;
   
   await db.execute(
