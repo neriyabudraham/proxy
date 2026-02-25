@@ -283,6 +283,29 @@ router.post('/phone/remove', apiKeyAuth, async (req, res) => {
   res.json({ success: true, phone: normalizedPhone });
 });
 
+// Get single available proxy
+router.get('/proxy/available', apiKeyAuth, async (req, res) => {
+  const proxy = await getAvailableProxy(req.apiUserId);
+  
+  if (!proxy) {
+    return res.status(404).json({ error: 'No available proxy found' });
+  }
+  
+  const phoneCount = await db.queryOne(
+    'SELECT COUNT(*) as count FROM phone_numbers WHERE proxy_id = $1',
+    [proxy.id]
+  );
+  
+  res.json({
+    id: proxy.id,
+    proxy: `${proxy.ip}:${proxy.port}`,
+    ip: proxy.ip,
+    port: proxy.port,
+    phoneCount: parseInt(phoneCount.count)
+  });
+});
+
+// Get all available proxies
 router.get('/proxies/available', apiKeyAuth, async (req, res) => {
   // Get user's maxPhonesPerProxy setting
   const setting = await db.queryOne(

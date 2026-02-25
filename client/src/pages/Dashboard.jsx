@@ -628,7 +628,18 @@ export default function Dashboard() {
 
                 <div className="bg-gray-50 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="font-semibold text-gray-700">קבלת פרוקסי פנויים</p>
+                    <p className="font-semibold text-gray-700">קבלת פרוקסי פנוי אחד</p>
+                    <button onClick={() => copyToClipboard(getCurlExample('/proxy/available', 'GET', null), 'curl-one')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-one' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                      {copied === 'curl-one' ? 'הועתק!' : 'העתק'}
+                    </button>
+                  </div>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/proxy/available', 'GET', null)}</pre>
+                  <p className="text-xs text-gray-500 mt-2">* מחזיר פרוקסי פנוי אחד (IP:PORT)</p>
+                </div>
+
+                <div className="bg-gray-50 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-gray-700">קבלת כל הפרוקסי הפנויים</p>
                     <button onClick={() => copyToClipboard(getCurlExample('/proxies/available', 'GET', null), 'curl-available')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-available' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
                       {copied === 'curl-available' ? 'הועתק!' : 'העתק'}
                     </button>
