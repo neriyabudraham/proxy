@@ -34,9 +34,11 @@ router.post('/', async (req, res) => {
   const inviteToken = crypto.randomBytes(32).toString('hex');
   
   // Create user without password (will set on first login via invite link)
+  // Set parent_id for viewer and editor roles so they can see admin's servers
+  const parentId = role !== 'admin' ? req.user.id : null;
   await db.execute(
     'INSERT INTO users (email, password, role, parent_id, invite_token) VALUES ($1, $2, $3, $4, $5)',
-    [email, '', role, role === 'viewer' ? req.user.id : null, inviteToken]
+    [email, '', role, parentId, inviteToken]
   );
   
   const user = await db.queryOne('SELECT id, email, role, parent_id, created_at, invite_token FROM users WHERE email = $1', [email]);

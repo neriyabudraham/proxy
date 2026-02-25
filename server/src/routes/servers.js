@@ -4,9 +4,8 @@ import { db } from '../db.js';
 const router = Router();
 
 router.get('/', async (req, res) => {
-  const userId = req.user.role === 'viewer' && req.user.parentId 
-    ? req.user.parentId 
-    : req.user.id;
+  // If user has a parent (viewer/editor), show parent's servers
+  const userId = req.user.parentId ? req.user.parentId : req.user.id;
   
   const servers = await db.query(
     'SELECT * FROM servers WHERE user_id = $1 ORDER BY created_at DESC',
