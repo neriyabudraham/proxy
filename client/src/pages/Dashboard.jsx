@@ -662,25 +662,52 @@ export default function Dashboard() {
         )}
 
         {activeTab === 'settings' && (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6 max-w-xl">
-            <h3 className="text-lg font-bold text-gray-800 mb-6">הגדרות מערכת</h3>
-            
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">מספר טלפונים מקסימלי לפרוקסי (פנוי)</label>
-                <p className="text-sm text-gray-500 mb-3">פרוקסי ייחשב "פנוי" אם יש לו פחות ממספר זה של טלפונים משויכים</p>
-                <input 
-                  type="number" 
-                  min="1" 
-                  value={settings.maxPhonesPerProxy} 
-                  onChange={(e) => setSettings({ ...settings, maxPhonesPerProxy: parseInt(e.target.value) || 3 })}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6 max-w-xl">
+              <h3 className="text-lg font-bold text-gray-800 mb-6">הגדרות כלליות</h3>
               
-              <button onClick={handleSaveSettings} className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200">
-                שמור הגדרות
-              </button>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">מספר טלפונים מקסימלי לפרוקסי (פנוי)</label>
+                  <p className="text-sm text-gray-500 mb-3">פרוקסי ייחשב "פנוי" אם יש לו פחות ממספר זה של טלפונים משויכים</p>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    value={settings.maxPhonesPerProxy} 
+                    onChange={(e) => setSettings({ ...settings, maxPhonesPerProxy: parseInt(e.target.value) || 3 })}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                
+                <button onClick={handleSaveSettings} className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200">
+                  שמור הגדרות
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
+              <h3 className="text-lg font-bold text-gray-800 mb-2">תבנית סקריפט מותאמת אישית</h3>
+              <p className="text-sm text-gray-500 mb-4">השאר ריק לשימוש בתבנית ברירת המחדל. השתמש ב-<code className="bg-gray-100 px-1 rounded">{`{{IPS}}`}</code> למיקום כתובות ה-IP ו-<code className="bg-gray-100 px-1 rounded">{`{{SERVER_NAME}}`}</code> לשם השרת.</p>
+              
+              <textarea
+                value={settings.scriptTemplate || ''}
+                onChange={(e) => setSettings({ ...settings, scriptTemplate: e.target.value })}
+                placeholder="השאר ריק לתבנית ברירת מחדל..."
+                className="w-full h-96 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono text-sm focus:ring-2 focus:ring-indigo-500 resize-none"
+                dir="ltr"
+                spellCheck={false}
+              />
+              
+              <div className="flex gap-3 mt-4">
+                <button onClick={handleSaveSettings} className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-xl font-semibold shadow-lg shadow-indigo-200">
+                  שמור תבנית
+                </button>
+                {settings.scriptTemplate && (
+                  <button onClick={() => setSettings({ ...settings, scriptTemplate: '' })} className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold">
+                    אפס לברירת מחדל
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

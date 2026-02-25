@@ -93,11 +93,16 @@ router.get('/settings', authMiddleware, async (req, res) => {
   const settings = await db.query('SELECT key, value FROM settings WHERE user_id = $1', [userId]);
   
   const settingsObj = {
-    maxPhonesPerProxy: 3 // default
+    maxPhonesPerProxy: 3,
+    scriptTemplate: ''
   };
   
   settings.forEach(s => {
-    settingsObj[s.key] = s.value;
+    if (s.key === 'maxPhonesPerProxy') {
+      settingsObj[s.key] = parseInt(s.value);
+    } else {
+      settingsObj[s.key] = s.value;
+    }
   });
   
   res.json(settingsObj);
@@ -109,13 +114,23 @@ router.put('/settings', authMiddleware, async (req, res) => {
     return res.status(403).json({ error: 'Only admins can change settings' });
   }
   
-  const { maxPhonesPerProxy } = req.body;
+  const { maxPhonesPerProxy, scriptTemplate } = req.body;
   
-  await db.execute(
-    `INSERT INTO settings (user_id, key, value) VALUES ($1, 'maxPhonesPerProxy', $2)
-     ON CONFLICT (user_id, key) DO UPDATE SET value = $2`,
-    [req.user.id, String(maxPhonesPerProxy)]
-  );
+  if (maxPhonesPerProxy !== undefined) {
+    await db.execute(
+      `INSERT INTO settings (user_id, key, value) VALUES ($1, 'maxPhonesPerProxy', $2)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = $2`,
+      [req.user.id, String(maxPhonesPerProxy)]
+    );
+  }
+  
+  if (scriptTemplate !== undefined) {
+    await db.execute(
+      `INSERT INTO settings (user_id, key, value) VALUES ($1, 'scriptTemplate', $2)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = $2`,
+      [req.user.id, scriptTemplate]
+    );
+  }
   
   res.json({ success: true });
 });

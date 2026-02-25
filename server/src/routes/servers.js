@@ -69,7 +69,22 @@ router.get('/:id/script', async (req, res) => {
       return res.status(400).json({ error: 'No proxy IPs configured' });
     }
     
-    const script = generateScript(server.name, proxyIps);
+    // Check for custom script template
+    const userId = req.user.parentId ? req.user.parentId : req.user.id;
+    const customTemplate = await db.queryOne(
+      "SELECT value FROM settings WHERE user_id = $1 AND key = 'scriptTemplate'",
+      [userId]
+    );
+    
+    let script;
+    if (customTemplate && customTemplate.value) {
+      const ipsArray = proxyIps.map(p => `"${p.ip}"`).join(' ');
+      script = customTemplate.value
+        .replace(/\{\{IPS\}\}/g, ipsArray)
+        .replace(/\{\{SERVER_NAME\}\}/g, server.name);
+    } else {
+      script = generateScript(server.name, proxyIps);
+    }
     
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send(script);
@@ -224,96 +239,97 @@ router.delete('/proxy/:proxyId/phones/:phoneId', async (req, res) => {
 
 function generateScript(serverName, proxyIps) {
   const ipsArray = proxyIps.map(p => `"${p.ip}"`).join(' ');
-  const portsArray = proxyIps.map(p => p.port).join(' ');
   
   return `#!/bin/bash
 # --- סקריפט התקנה אוטומטי עבור שרת: ${serverName} ---
 # --- נוצר אוטומטית על ידי מערכת ניהול פרוקסי ---
 
-# הגדרת כתובות IP ופורטים
+# 1. הגדר את הכתובות שלך כאן (מופרדות ברווחים)
 IPS=(${ipsArray})
-PORTS=(${portsArray})
 
-# הרצת הסקריפט האוטומטי המלא
-sudo bash -c '
+# 2. הרצת הסקריפט האוטומטי המלא
+sudo bash -c "
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
-echo "📂 1/6: מנקה התקנות קודמות ומתקין Docker..."
+echo '📂 1/6: מנקה התקנות קודמות ומתקין Docker...'
 apt-get update && apt-get install -y docker.io docker-compose curl
 killall -9 tinyproxy 2>/dev/null || true
-docker rm -f $(docker ps -aq --filter name=proxy-p) 2>/dev/null || true
+docker rm -f \\$(docker ps -aq --filter name=proxy-p) 2>/dev/null || true
 
-echo "📡 2/6: מגדיר כתובות IP במערכת (Netplan)..."
-INTERFACE=$(ip -o -4 route show to default | awk "{print \\$5}")
-GATEWAY=$(ip route | grep default | awk "{print \\$3}")
-NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
-cp $NETPLAN_FILE "\${NETPLAN_FILE}.bak"
+echo '📡 2/6: מגדיר כתובות IP במערכת (Netplan)...'
+INTERFACE=\\$(ip -o -4 route show to default | awk '{print \\$5}')
+GATEWAY=\\$(ip route | grep default | awk '{print \\$3}')
+NETPLAN_FILE=\\\"/etc/netplan/50-cloud-init.yaml\\\"
+[ -f \\$NETPLAN_FILE ] && cp \\$NETPLAN_FILE \\\"\\${NETPLAN_FILE}.bak\\\"
 
-cat <<NETPLAN > $NETPLAN_FILE
+cat <<EOF > \\$NETPLAN_FILE
 network:
     version: 2
     ethernets:
-        $INTERFACE:
+        \\$INTERFACE:
             addresses:
-NETPLAN
-for ip in "\${IPS[@]}"; do
-    echo "            - $ip/32" >> $NETPLAN_FILE
+EOF
+for ip in \\\"\\${IPS[@]}\\\"; do
+    echo \\\"            - \\$ip/32\\\" >> \\$NETPLAN_FILE
 done
-cat <<NETPLAN >> $NETPLAN_FILE
+cat <<EOF >> \\$NETPLAN_FILE
             routes:
                 - to: default
-                  via: $GATEWAY
+                  via: \\$GATEWAY
             nameservers:
                 addresses: [8.8.8.8, 1.1.1.1]
-NETPLAN
+EOF
 netplan apply
 sleep 2
 
-echo "🏗️ 3/6: בונה אימג פרוקסי אנונימי מקומי..."
+echo '🏗️ 3/6: בונה אימג פרוקסי אנונימי מקומי (Max Performance)...'
 mkdir -p ~/proxy-factory && cd ~/proxy-factory
-cat <<DOCKERFILE > Dockerfile
+cat <<EOF > Dockerfile
 FROM alpine:latest
 RUN apk add --no-cache tinyproxy
-RUN echo -e "User tinyproxy\\nGroup tinyproxy\\nPort 8888\\nTimeout 600\\nMaxClients 500\\nAllow 0.0.0.0/0\\nDisableViaHeader Yes\\nConnectPort 443\\nConnectPort 5222\\nAnonymous \\"Host\\"\\nAnonymous \\"Authorization\\"\\nAnonymous \\"User-Agent\\"" > /etc/tinyproxy/tinyproxy.conf
-CMD ["tinyproxy", "-d"]
-DOCKERFILE
+# הגדרות אופטימליות לבוטים: 1,000,000 חיבורים ו-Timeout של שעה
+RUN echo -e \\\"User tinyproxy\\\\nGroup tinyproxy\\\\nPort 8888\\\\nTimeout 3600\\\\nMaxClients 1000000\\\\nAllow 0.0.0.0/0\\\\nDisableViaHeader Yes\\\\nConnectPort 443\\\\nConnectPort 5222\\\\nAnonymous \\\\\\\"Host\\\\\\\"\\\\nAnonymous \\\\\\\"Authorization\\\\\\\"\\\\nAnonymous \\\\\\\"User-Agent\\\\\\\"\\\" > /etc/tinyproxy/tinyproxy.conf
+CMD [\\\"tinyproxy\\\", \\\"-d\\\"]
+EOF
 docker build -t local-tinyproxy .
 
-echo "📝 4/6: מייצר קובץ Docker Compose דינאמי..."
-cat <<COMPOSE > docker-compose.yml
-version: "3.8"
+echo '📝 4/6: מייצר קובץ Docker Compose עם ulimits מורחב...'
+cat <<EOF > docker-compose.yml
+version: '3.8'
 services:
-COMPOSE
-
-for i in "\${!IPS[@]}"; do
-    IP="\${IPS[$i]}"
-    PORT="\${PORTS[$i]}"
-    cat <<COMPOSE >> docker-compose.yml
-  proxy-p$PORT:
+EOF
+PORT=8080
+for ip in \\\"\\${IPS[@]}\\\"; do
+    cat <<EOF >> docker-compose.yml
+  proxy-p\\$PORT:
     image: local-tinyproxy
-    container_name: proxy-p$PORT
+    container_name: proxy-p\\$PORT
     restart: always
+    ulimits:
+      nofile:
+        soft: 1000000
+        hard: 1000000
     ports:
-      - "$IP:$PORT:8888"
-COMPOSE
+      - \\\"\\$ip:\\$PORT:8888\\\"
+EOF
+    PORT=\\$((PORT + 1))
 done
 
-echo "🛡️ 5/6: פותח Firewall פנימי (UFW)..."
+echo '🛡️ 5/6: פותח Firewall פנימי (UFW)...'
 ufw allow ssh >> /dev/null
-for PORT in "\${PORTS[@]}"; do
-    ufw allow $PORT/tcp >> /dev/null
-done
-echo "y" | ufw enable >> /dev/null
+PORT_END=\\$((8080 + \\${#IPS[@]} - 1))
+ufw allow 8080:\\$PORT_END/tcp >> /dev/null
+echo \\\"y\\\" | ufw enable >> /dev/null
 
-echo "🚢 6/6: מפעיל את הקונטיינרים..."
+echo '🚢 6/6: מפעיל את הקונטיינרים...'
 docker-compose up -d
 
-echo ""
-echo "--- ✨ המערכת הוקמה בהצלחה! ---"
-echo "רשימת הפרוקסים הפעילים שלך:"
-docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
-'
+echo ''
+echo '--- ✨ המערכת הוקמה בהצלחה (במצב Unlimited)! ---'
+echo 'רשימת הפרוקסים הפעילים שלך:'
+docker ps --format \\\"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\\\"
+"
 `;
 }
 
