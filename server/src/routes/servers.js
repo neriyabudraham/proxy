@@ -255,28 +255,28 @@ export DEBIAN_FRONTEND=noninteractive
 echo '📂 1/6: מנקה התקנות קודמות ומתקין Docker...'
 apt-get update && apt-get install -y docker.io docker-compose curl
 killall -9 tinyproxy 2>/dev/null || true
-docker rm -f \\$(docker ps -aq --filter name=proxy-p) 2>/dev/null || true
+docker rm -f \\\$(docker ps -aq --filter name=proxy-p) 2>/dev/null || true
 
 echo '📡 2/6: מגדיר כתובות IP במערכת (Netplan)...'
-INTERFACE=\\$(ip -o -4 route show to default | awk '{print \\$5}')
-GATEWAY=\\$(ip route | grep default | awk '{print \\$3}')
+INTERFACE=\\\$(ip -o -4 route show to default | awk '{print \\\$5}')
+GATEWAY=\\\$(ip route | grep default | awk '{print \\\$3}')
 NETPLAN_FILE=\\\"/etc/netplan/50-cloud-init.yaml\\\"
-[ -f \\$NETPLAN_FILE ] && cp \\$NETPLAN_FILE \\\"\\${NETPLAN_FILE}.bak\\\"
+[ -f \\\$NETPLAN_FILE ] && cp \\\$NETPLAN_FILE \\\"\\\${NETPLAN_FILE}.bak\\\"
 
-cat <<EOF > \\$NETPLAN_FILE
+cat <<EOF > \\\$NETPLAN_FILE
 network:
     version: 2
     ethernets:
-        \\$INTERFACE:
+        \\\$INTERFACE:
             addresses:
 EOF
-for ip in \\\"\\${IPS[@]}\\\"; do
-    echo \\\"            - \\$ip/32\\\" >> \\$NETPLAN_FILE
+for ip in \\\"\\\${IPS[@]}\\\"; do
+    echo \\\"            - \\\$ip/32\\\" >> \\\$NETPLAN_FILE
 done
-cat <<EOF >> \\$NETPLAN_FILE
+cat <<EOF >> \\\$NETPLAN_FILE
             routes:
                 - to: default
-                  via: \\$GATEWAY
+                  via: \\\$GATEWAY
             nameservers:
                 addresses: [8.8.8.8, 1.1.1.1]
 EOF
@@ -300,26 +300,26 @@ version: '3.8'
 services:
 EOF
 PORT=8080
-for ip in \\\"\\${IPS[@]}\\\"; do
+for ip in \\\"\\\${IPS[@]}\\\"; do
     cat <<EOF >> docker-compose.yml
-  proxy-p\\$PORT:
+  proxy-p\\\$PORT:
     image: local-tinyproxy
-    container_name: proxy-p\\$PORT
+    container_name: proxy-p\\\$PORT
     restart: always
     ulimits:
       nofile:
         soft: 1000000
         hard: 1000000
     ports:
-      - \\\"\\$ip:\\$PORT:8888\\\"
+      - \\\"\\\$ip:\\\$PORT:8888\\\"
 EOF
-    PORT=\\$((PORT + 1))
+    PORT=\\\$((PORT + 1))
 done
 
 echo '🛡️ 5/6: פותח Firewall פנימי (UFW)...'
 ufw allow ssh >> /dev/null
-PORT_END=\\$((8080 + \\${#IPS[@]} - 1))
-ufw allow 8080:\\$PORT_END/tcp >> /dev/null
+PORT_END=\\\$((8080 + \\\${#IPS[@]} - 1))
+ufw allow 8080:\\\$PORT_END/tcp >> /dev/null
 echo \\\"y\\\" | ufw enable >> /dev/null
 
 echo '🚢 6/6: מפעיל את הקונטיינרים...'

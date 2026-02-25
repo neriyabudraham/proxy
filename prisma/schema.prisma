@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String?
+  name          String?
+  role          String    @default("viewer") // admin, editor, viewer
+  parentId      String?
+  parent        User?     @relation("UserHierarchy", fields: [parentId], references: [id])
+  children      User[]    @relation("UserHierarchy")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  servers       Server[]
+  passwordSetup Boolean   @default(false)
+}
+
+model Server {
+  id          String    @id @default(cuid())
+  name        String
+  mainIp      String
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  proxyIps    ProxyIp[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model ProxyIp {
+  id        String   @id @default(cuid())
+  ip        String
+  port      Int      @default(8080)
+  serverId  String
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
