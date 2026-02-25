@@ -686,13 +686,12 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
-              <h3 className="text-lg font-bold text-gray-800 mb-2">תבנית סקריפט מותאמת אישית</h3>
-              <p className="text-sm text-gray-500 mb-4">השאר ריק לשימוש בתבנית ברירת המחדל. השתמש ב-<code className="bg-gray-100 px-1 rounded">{`{{IPS}}`}</code> למיקום כתובות ה-IP ו-<code className="bg-gray-100 px-1 rounded">{`{{SERVER_NAME}}`}</code> לשם השרת.</p>
+              <h3 className="text-lg font-bold text-gray-800 mb-2">תבנית סקריפט</h3>
+              <p className="text-sm text-gray-500 mb-4">השתמש ב-<code className="bg-gray-100 px-1 rounded">{`{{IPS}}`}</code> למיקום כתובות ה-IP ו-<code className="bg-gray-100 px-1 rounded">{`{{SERVER_NAME}}`}</code> לשם השרת.</p>
               
               <textarea
-                value={settings.scriptTemplate || ''}
+                value={settings.scriptTemplate || settings.defaultScriptTemplate || ''}
                 onChange={(e) => setSettings({ ...settings, scriptTemplate: e.target.value })}
-                placeholder="השאר ריק לתבנית ברירת מחדל..."
                 className="w-full h-96 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono text-sm focus:ring-2 focus:ring-indigo-500 resize-none"
                 dir="ltr"
                 spellCheck={false}

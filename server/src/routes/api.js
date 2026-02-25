@@ -87,6 +87,98 @@ router.delete('/keys/:id', authMiddleware, async (req, res) => {
 });
 
 // Settings management (requires auth)
+const DEFAULT_SCRIPT_TEMPLATE = String.raw`#!/bin/bash
+# --- סקריפט התקנה אוטומטי עבור שרת: {{SERVER_NAME}} ---
+# --- נוצר אוטומטית על ידי מערכת ניהול פרוקסי ---
+
+# 1. הגדר את הכתובות שלך כאן (מופרדות ברווחים)
+IPS=({{IPS}})
+
+# 2. הרצת הסקריפט האוטומטי המלא
+sudo bash -c "
+set -e
+export DEBIAN_FRONTEND=noninteractive
+
+echo '📂 1/6: מנקה התקנות קודמות ומתקין Docker...'
+apt-get update && apt-get install -y docker.io docker-compose curl
+killall -9 tinyproxy 2>/dev/null || true
+docker rm -f \$(docker ps -aq --filter name=proxy-p) 2>/dev/null || true
+
+echo '📡 2/6: מגדיר כתובות IP במערכת (Netplan)...'
+INTERFACE=\$(ip -o -4 route show to default | awk '{print \$5}')
+GATEWAY=\$(ip route | grep default | awk '{print \$3}')
+NETPLAN_FILE=\"/etc/netplan/50-cloud-init.yaml\"
+[ -f \$NETPLAN_FILE ] && cp \$NETPLAN_FILE \"\${NETPLAN_FILE}.bak\"
+
+cat <<EOF > \$NETPLAN_FILE
+network:
+    version: 2
+    ethernets:
+        \$INTERFACE:
+            addresses:
+EOF
+for ip in \"\${IPS[@]}\"; do
+    echo \"            - \$ip/32\" >> \$NETPLAN_FILE
+done
+cat <<EOF >> \$NETPLAN_FILE
+            routes:
+                - to: default
+                  via: \$GATEWAY
+            nameservers:
+                addresses: [8.8.8.8, 1.1.1.1]
+EOF
+netplan apply
+sleep 2
+
+echo '🏗️ 3/6: בונה אימג פרוקסי אנונימי מקומי (Max Performance)...'
+mkdir -p ~/proxy-factory && cd ~/proxy-factory
+cat <<EOF > Dockerfile
+FROM alpine:latest
+RUN apk add --no-cache tinyproxy
+# הגדרות אופטימליות לבוטים: 1,000,000 חיבורים ו-Timeout של שעה
+RUN echo -e \"User tinyproxy\nGroup tinyproxy\nPort 8888\nTimeout 3600\nMaxClients 1000000\nAllow 0.0.0.0/0\nDisableViaHeader Yes\nConnectPort 443\nConnectPort 5222\nAnonymous \\\"Host\\\"\nAnonymous \\\"Authorization\\\"\nAnonymous \\\"User-Agent\\\"\" > /etc/tinyproxy/tinyproxy.conf
+CMD [\"tinyproxy\", \"-d\"]
+EOF
+docker build -t local-tinyproxy .
+
+echo '📝 4/6: מייצר קובץ Docker Compose עם ulimits מורחב...'
+cat <<EOF > docker-compose.yml
+version: '3.8'
+services:
+EOF
+PORT=8080
+for ip in \"\${IPS[@]}\"; do
+    cat <<EOF >> docker-compose.yml
+  proxy-p\$PORT:
+    image: local-tinyproxy
+    container_name: proxy-p\$PORT
+    restart: always
+    ulimits:
+      nofile:
+        soft: 1000000
+        hard: 1000000
+    ports:
+      - \"\$ip:\$PORT:8888\"
+EOF
+    PORT=\$((PORT + 1))
+done
+
+echo '🛡️ 5/6: פותח Firewall פנימי (UFW)...'
+ufw allow ssh >> /dev/null
+PORT_END=\$((8080 + \${#IPS[@]} - 1))
+ufw allow 8080:\$PORT_END/tcp >> /dev/null
+echo \"y\" | ufw enable >> /dev/null
+
+echo '🚢 6/6: מפעיל את הקונטיינרים...'
+docker-compose up -d
+
+echo ''
+echo '--- ✨ המערכת הוקמה בהצלחה (במצב Unlimited)! ---'
+echo 'רשימת הפרוקסים הפעילים שלך:'
+docker ps --format \"table {{.Names}}\t{{.Status}}\t{{.Ports}}\"
+"
+`;
+
 router.get('/settings', authMiddleware, async (req, res) => {
   // Use parent's settings for editors/viewers
   const userId = req.user.parentId ? req.user.parentId : req.user.id;
@@ -94,7 +186,8 @@ router.get('/settings', authMiddleware, async (req, res) => {
   
   const settingsObj = {
     maxPhonesPerProxy: 3,
-    scriptTemplate: ''
+    scriptTemplate: '',
+    defaultScriptTemplate: DEFAULT_SCRIPT_TEMPLATE
   };
   
   settings.forEach(s => {
