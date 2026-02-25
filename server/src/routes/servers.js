@@ -51,6 +51,34 @@ router.post('/', async (req, res) => {
   res.json(server);
 });
 
+// Script generation - must be before /:id routes
+router.get('/:id/script', async (req, res) => {
+  try {
+    const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [req.params.id]);
+    
+    if (!server) {
+      return res.status(404).json({ error: 'Server not found' });
+    }
+    
+    const proxyIps = await db.query(
+      'SELECT * FROM proxy_ips WHERE server_id = $1 ORDER BY port',
+      [server.id]
+    );
+    
+    if (proxyIps.length === 0) {
+      return res.status(400).json({ error: 'No proxy IPs configured' });
+    }
+    
+    const script = generateScript(server.name, proxyIps);
+    
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(script);
+  } catch (err) {
+    console.error('Script generation error:', err);
+    res.status(500).json({ error: 'Failed to generate script' });
+  }
+});
+
 router.put('/:id', async (req, res) => {
   if (req.user.role === 'viewer') {
     return res.status(403).json({ error: 'Forbidden' });
@@ -159,28 +187,6 @@ router.delete('/proxy/:proxyId/phones/:phoneId', async (req, res) => {
   res.json({ success: true });
 });
 
-router.get('/:id/script', async (req, res) => {
-  const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [req.params.id]);
-  
-  if (!server) {
-    return res.status(404).json({ error: 'Server not found' });
-  }
-  
-  const proxyIps = await db.query(
-    'SELECT * FROM proxy_ips WHERE server_id = $1 ORDER BY port',
-    [server.id]
-  );
-  
-  if (proxyIps.length === 0) {
-    return res.status(400).json({ error: 'No proxy IPs configured' });
-  }
-  
-  const script = generateScript(server.name, proxyIps);
-  
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="setup-${server.name.replace(/\s+/g, '-')}.sh"`);
-  res.send(script);
-});
 
 function generateScript(serverName, proxyIps) {
   const ipsArray = proxyIps.map(p => `"${p.ip}"`).join(' ');
