@@ -1,8 +1,6 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 import { db } from '../db.js';
-import { sendNewUserEmail } from '../mail.js';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -12,7 +10,7 @@ router.get('/', async (req, res) => {
   }
   
   const users = await db.query(
-    'SELECT id, email, name, role, parent_id, created_at FROM users WHERE id != $1 ORDER BY created_at DESC',
+    'SELECT id, email, role, parent_id, created_at, invite_token FROM users WHERE id != $1 ORDER BY created_at DESC',
     [req.user.id]
   );
   
@@ -24,33 +22,46 @@ router.post('/', async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   
-  const { email, name, role, parentId } = req.body;
+  const { email, role } = req.body;
   
-  const existing = await db.queryOne('SELECT * FROM users WHERE email = $1', [email]);
+  // Check if user already exists
+  const existing = await db.queryOne('SELECT id FROM users WHERE email = $1', [email]);
   if (existing) {
     return res.status(400).json({ error: 'User already exists' });
   }
   
-  const tempPassword = crypto.randomBytes(8).toString('hex');
-  const hashedPassword = await bcrypt.hash(tempPassword, 12);
+  // Generate invite token
+  const inviteToken = crypto.randomBytes(32).toString('hex');
   
-  const result = await db.execute(
-    'INSERT INTO users (email, name, password, role, parent_id, password_setup) VALUES ($1, $2, $3, $4, $5, true) RETURNING id',
-    [email, name || null, hashedPassword, role || 'viewer', parentId || null]
+  // Create user without password (will set on first login via invite link)
+  await db.execute(
+    'INSERT INTO users (email, password, role, parent_id, invite_token) VALUES ($1, $2, $3, $4, $5)',
+    [email, '', role, role === 'viewer' ? req.user.id : null, inviteToken]
   );
   
-  try {
-    await sendNewUserEmail(email, tempPassword);
-  } catch (error) {
-    console.error('Failed to send email:', error);
+  const user = await db.queryOne('SELECT id, email, role, parent_id, created_at, invite_token FROM users WHERE email = $1', [email]);
+  
+  res.json(user);
+});
+
+router.post('/:id/regenerate-invite', async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
   }
   
-  const user = await db.queryOne(
-    'SELECT id, email, name, role, parent_id, created_at FROM users WHERE id = $1',
-    [result.rows[0].id]
+  const { id } = req.params;
+  
+  // Generate new invite token
+  const inviteToken = crypto.randomBytes(32).toString('hex');
+  
+  await db.execute(
+    'UPDATE users SET invite_token = $1, password = $2 WHERE id = $3',
+    [inviteToken, '', id]
   );
   
-  res.json({ ...user, tempPassword });
+  const user = await db.queryOne('SELECT id, email, role, parent_id, created_at, invite_token FROM users WHERE id = $1', [id]);
+  
+  res.json(user);
 });
 
 router.delete('/:id', async (req, res) => {

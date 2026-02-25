@@ -13,18 +13,22 @@ export default function Dashboard() {
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [showProxyModal, setShowProxyModal] = useState(false);
   const [script, setScript] = useState('');
   const [selectedServer, setSelectedServer] = useState(null);
   const [selectedProxy, setSelectedProxy] = useState(null);
   const [editingServer, setEditingServer] = useState(null);
-  const [serverForm, setServerForm] = useState({ name: '', mainIp: '', proxyIps: '' });
-  const [userForm, setUserForm] = useState({ email: '', name: '', role: 'viewer', parentId: '' });
-  const [newUserPassword, setNewUserPassword] = useState('');
+  const [serverForm, setServerForm] = useState({ name: '', mainIp: '' });
+  const [proxyForm, setProxyForm] = useState({ ip: '', port: '' });
+  const [userForm, setUserForm] = useState({ email: '', role: 'viewer' });
+  const [inviteLink, setInviteLink] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newApiKeyName, setNewApiKeyName] = useState('');
-  const [newApiKey, setNewApiKey] = useState('');
   const [stats, setStats] = useState({ servers: 0, ips: 0, users: 0, phones: 0 });
   const [copied, setCopied] = useState('');
+  const [selectedApiKey, setSelectedApiKey] = useState(null);
+
+  const baseUrl = window.location.origin;
 
   useEffect(() => {
     fetchServers();
@@ -66,7 +70,6 @@ export default function Dashboard() {
 
   const handleSaveServer = async (e) => {
     e.preventDefault();
-    const proxyIps = serverForm.proxyIps.split('\n').map(ip => ip.trim()).filter(Boolean);
     const url = editingServer ? `/api/servers/${editingServer.id}` : '/api/servers';
     const method = editingServer ? 'PUT' : 'POST';
 
@@ -74,11 +77,11 @@ export default function Dashboard() {
       method,
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ name: serverForm.name, mainIp: serverForm.mainIp, proxyIps })
+      body: JSON.stringify(serverForm)
     });
 
     setShowServerModal(false);
-    setServerForm({ name: '', mainIp: '', proxyIps: '' });
+    setServerForm({ name: '', mainIp: '' });
     setEditingServer(null);
     fetchServers();
   };
@@ -89,12 +92,35 @@ export default function Dashboard() {
     fetchServers();
   };
 
+  const handleAddProxy = async (e) => {
+    e.preventDefault();
+    await fetch(`/api/servers/${selectedServer.id}/proxies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ ip: proxyForm.ip, port: proxyForm.port ? parseInt(proxyForm.port) : null })
+    });
+    setProxyForm({ ip: '', port: '' });
+    fetchServers();
+  };
+
+  const handleDeleteProxy = async (serverId, proxyId) => {
+    if (!confirm('האם אתה בטוח?')) return;
+    await fetch(`/api/servers/${serverId}/proxies/${proxyId}`, { method: 'DELETE', credentials: 'include' });
+    fetchServers();
+  };
+
   const handleShowScript = async (server) => {
     setSelectedServer(server);
     const res = await fetch(`/api/servers/${server.id}/script`, { credentials: 'include' });
-    const text = await res.text();
-    setScript(text);
-    setShowScriptModal(true);
+    if (res.ok) {
+      const text = await res.text();
+      setScript(text);
+      setShowScriptModal(true);
+    } else {
+      const data = await res.json();
+      alert(data.error || 'שגיאה בהבאת הסקריפט');
+    }
   };
 
   const handleCreateUser = async (e) => {
@@ -106,8 +132,21 @@ export default function Dashboard() {
       body: JSON.stringify(userForm)
     });
     const data = await res.json();
-    if (data.tempPassword) {
-      setNewUserPassword(data.tempPassword);
+    if (data.invite_token) {
+      setInviteLink(`${baseUrl}/invite/${data.invite_token}`);
+    }
+    fetchUsers();
+  };
+
+  const handleRegenerateInvite = async (userId) => {
+    const res = await fetch(`/api/users/${userId}/regenerate-invite`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (data.invite_token) {
+      copyToClipboard(`${baseUrl}/invite/${data.invite_token}`, `invite-${userId}`);
+      alert('לינק הזמנה חדש הועתק!');
     }
     fetchUsers();
   };
@@ -120,12 +159,14 @@ export default function Dashboard() {
 
   const openEditServer = (server) => {
     setEditingServer(server);
-    setServerForm({
-      name: server.name,
-      mainIp: server.main_ip,
-      proxyIps: server.proxyIps.map(p => p.ip).join('\n')
-    });
+    setServerForm({ name: server.name, mainIp: server.main_ip });
     setShowServerModal(true);
+  };
+
+  const openProxyManager = (server) => {
+    setSelectedServer(server);
+    setProxyForm({ ip: '', port: '' });
+    setShowProxyModal(true);
   };
 
   const handleAddPhone = async (e) => {
@@ -157,13 +198,14 @@ export default function Dashboard() {
       body: JSON.stringify({ name: newApiKeyName })
     });
     const data = await res.json();
-    setNewApiKey(data.key);
+    setSelectedApiKey(data);
     fetchApiKeys();
   };
 
   const handleDeleteApiKey = async (id) => {
     if (!confirm('האם אתה בטוח?')) return;
     await fetch(`/api/v1/keys/${id}`, { method: 'DELETE', credentials: 'include' });
+    if (selectedApiKey?.id === id) setSelectedApiKey(null);
     fetchApiKeys();
   };
 
@@ -190,6 +232,17 @@ export default function Dashboard() {
     a.href = url;
     a.download = `setup-${selectedServer?.name.replace(/\s+/g, '-')}.sh`;
     a.click();
+  };
+
+  const getCurlExample = (endpoint, method, body, apiKey) => {
+    const key = apiKey || selectedApiKey?.key || 'YOUR_API_KEY';
+    let curl = `curl -X ${method} "${baseUrl}/api/v1${endpoint}"`;
+    curl += ` \\\n  -H "X-API-Key: ${key}"`;
+    if (body) {
+      curl += ` \\\n  -H "Content-Type: application/json"`;
+      curl += ` \\\n  -d '${JSON.stringify(body)}'`;
+    }
+    return curl;
   };
 
   const isAdmin = user?.role === 'admin';
@@ -322,7 +375,7 @@ export default function Dashboard() {
         {activeTab === 'servers' && (
           <>
             {canEdit && (
-              <button onClick={() => { setEditingServer(null); setServerForm({ name: '', mainIp: '', proxyIps: '' }); setShowServerModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all">
+              <button onClick={() => { setEditingServer(null); setServerForm({ name: '', mainIp: '' }); setShowServerModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:from-indigo-600 hover:via-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                 הוסף שרת חדש
               </button>
@@ -347,6 +400,7 @@ export default function Dashboard() {
                       <button onClick={() => handleShowScript(server)} className="px-4 py-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium text-sm transition">סקריפט</button>
                       {canEdit && (
                         <>
+                          <button onClick={() => openProxyManager(server)} className="px-4 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg font-medium text-sm transition">+ פרוקסי</button>
                           <button onClick={() => openEditServer(server)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                           </button>
@@ -359,50 +413,66 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="p-6">
-                    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                      {server.proxyIps?.map(proxy => (
-                        <div key={proxy.id} className="bg-gray-50 rounded-xl p-4 hover:bg-indigo-50 transition group">
-                          <div className="flex items-center justify-between mb-3">
-                            <button 
-                              onClick={() => copyToClipboard(`${proxy.ip}:${proxy.port}`, `proxy-${proxy.id}`)}
-                              className="flex items-center gap-2 font-mono text-gray-800 hover:text-indigo-600 transition"
-                            >
-                              <span className="font-semibold">{proxy.ip}:{proxy.port}</span>
-                              {copied === `proxy-${proxy.id}` ? (
-                                <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                              ) : (
-                                <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                              )}
-                            </button>
-                            <span className={`px-2 py-1 text-xs rounded-full ${proxy.phones?.length >= settings.maxPhonesPerProxy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                              {proxy.phones?.length || 0}/{settings.maxPhonesPerProxy}
-                            </span>
-                          </div>
-                          
-                          <div className="space-y-1 mb-3">
-                            {proxy.phones?.slice(0, 3).map(phone => (
-                              <div key={phone.id} className="flex items-center justify-between text-sm bg-white rounded-lg px-3 py-1.5">
-                                <span className="text-gray-600">{phone.phone}</span>
+                    {server.proxyIps?.length > 0 ? (
+                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        {server.proxyIps.map(proxy => (
+                          <div key={proxy.id} className="bg-gray-50 rounded-xl p-4 hover:bg-indigo-50 transition group">
+                            <div className="flex items-center justify-between mb-3">
+                              <button 
+                                onClick={() => copyToClipboard(`${proxy.ip}:${proxy.port}`, `proxy-${proxy.id}`)}
+                                className="flex items-center gap-2 font-mono text-gray-800 hover:text-indigo-600 transition"
+                              >
+                                <span className="font-semibold">{proxy.ip}:{proxy.port}</span>
+                                {copied === `proxy-${proxy.id}` ? (
+                                  <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                ) : (
+                                  <svg className="w-4 h-4 opacity-0 group-hover:opacity-100 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                                )}
+                              </button>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 text-xs rounded-full ${proxy.phones?.length >= settings.maxPhonesPerProxy ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                                  {proxy.phones?.length || 0}/{settings.maxPhonesPerProxy}
+                                </span>
                                 {canEdit && (
-                                  <button onClick={() => handleRemovePhone(phone.id)} className="text-red-400 hover:text-red-600">
+                                  <button onClick={() => handleDeleteProxy(server.id, proxy.id)} className="p-1 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                   </button>
                                 )}
                               </div>
-                            ))}
-                            {proxy.phones?.length > 3 && (
-                              <p className="text-xs text-gray-500 text-center">+{proxy.phones.length - 3} נוספים</p>
+                            </div>
+                            
+                            <div className="space-y-1 mb-3">
+                              {proxy.phones?.slice(0, 3).map(phone => (
+                                <div key={phone.id} className="flex items-center justify-between text-sm bg-white rounded-lg px-3 py-1.5">
+                                  <span className="text-gray-600">{phone.phone}</span>
+                                  {canEdit && (
+                                    <button onClick={() => { setSelectedProxy(proxy); handleRemovePhone(phone.id); }} className="text-red-400 hover:text-red-600">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                              {proxy.phones?.length > 3 && (
+                                <p className="text-xs text-gray-500 text-center">+{proxy.phones.length - 3} נוספים</p>
+                              )}
+                            </div>
+                            
+                            {canEdit && (
+                              <button onClick={() => { setSelectedProxy(proxy); setShowPhoneModal(true); }} className="w-full py-2 text-sm text-indigo-600 hover:bg-indigo-100 rounded-lg transition">
+                                + הוסף טלפון
+                              </button>
                             )}
                           </div>
-                          
-                          {canEdit && (
-                            <button onClick={() => { setSelectedProxy(proxy); setShowPhoneModal(true); }} className="w-full py-2 text-sm text-indigo-600 hover:bg-indigo-100 rounded-lg transition">
-                              + הוסף טלפון
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <p>אין כתובות פרוקסי</p>
+                        {canEdit && (
+                          <button onClick={() => openProxyManager(server)} className="mt-2 text-indigo-600 hover:underline">+ הוסף פרוקסי</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -423,7 +493,7 @@ export default function Dashboard() {
 
         {activeTab === 'users' && isAdmin && (
           <>
-            <button onClick={() => { setUserForm({ email: '', name: '', role: 'viewer', parentId: '' }); setNewUserPassword(''); setShowUserModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-purple-200">
+            <button onClick={() => { setUserForm({ email: '', role: 'viewer' }); setInviteLink(''); setShowUserModal(true); }} className="mb-8 px-6 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-purple-200">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
               הוסף משתמש
             </button>
@@ -433,8 +503,8 @@ export default function Dashboard() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">אימייל</th>
-                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">שם</th>
                     <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">תפקיד</th>
+                    <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">סטטוס</th>
                     <th className="px-6 py-4 text-right text-sm font-bold text-gray-700">פעולות</th>
                   </tr>
                 </thead>
@@ -442,14 +512,25 @@ export default function Dashboard() {
                   {users.map(u => (
                     <tr key={u.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 text-gray-700 font-mono text-sm">{u.email}</td>
-                      <td className="px-6 py-4 text-gray-700">{u.name || '-'}</td>
                       <td className="px-6 py-4">
                         <span className={`px-3 py-1.5 text-xs rounded-full font-semibold ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : u.role === 'editor' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
                           {u.role === 'admin' ? 'מנהל' : u.role === 'editor' ? 'עורך' : 'צופה'}
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <button onClick={() => handleDeleteUser(u.id)} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg">מחק</button>
+                        {u.invite_token ? (
+                          <span className="px-3 py-1.5 text-xs rounded-full font-semibold bg-yellow-100 text-yellow-700">ממתין להרשמה</span>
+                        ) : (
+                          <span className="px-3 py-1.5 text-xs rounded-full font-semibold bg-green-100 text-green-700">פעיל</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex gap-2">
+                          {u.invite_token && (
+                            <button onClick={() => handleRegenerateInvite(u.id)} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-sm rounded-lg">העתק לינק</button>
+                          )}
+                          <button onClick={() => handleDeleteUser(u.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg">מחק</button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -464,19 +545,26 @@ export default function Dashboard() {
             <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-lg font-bold text-gray-800">מפתחות API</h3>
-                <button onClick={() => { setNewApiKeyName(''); setNewApiKey(''); setShowApiKeyModal(true); }} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium text-sm">
+                <button onClick={() => { setNewApiKeyName(''); setSelectedApiKey(null); setShowApiKeyModal(true); }} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg font-medium text-sm">
                   + צור מפתח חדש
                 </button>
               </div>
               
               <div className="space-y-3">
                 {apiKeys.map(key => (
-                  <div key={key.id} className="flex items-center justify-between bg-gray-50 rounded-xl p-4">
-                    <div>
-                      <p className="font-medium text-gray-800">{key.name}</p>
-                      <p className="font-mono text-sm text-gray-500">{key.key}</p>
+                  <div key={key.id} className={`bg-gray-50 rounded-xl p-4 border-2 transition cursor-pointer ${selectedApiKey?.id === key.id ? 'border-indigo-500' : 'border-transparent hover:border-gray-200'}`} onClick={() => setSelectedApiKey(key)}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-800">{key.name}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <code className="font-mono text-sm text-gray-600 bg-white px-2 py-1 rounded">{key.key}</code>
+                          <button onClick={(e) => { e.stopPropagation(); copyToClipboard(key.key, `key-${key.id}`); }} className={`px-2 py-1 text-xs rounded ${copied === `key-${key.id}` ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                            {copied === `key-${key.id}` ? 'הועתק!' : 'העתק'}
+                          </button>
+                        </div>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteApiKey(key.id); }} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg">מחק</button>
                     </div>
-                    <button onClick={() => handleDeleteApiKey(key.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-sm rounded-lg">מחק</button>
                   </div>
                 ))}
                 {apiKeys.length === 0 && (
@@ -486,37 +574,52 @@ export default function Dashboard() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-100 shadow-lg p-6">
-              <h3 className="text-lg font-bold text-gray-800 mb-4">תיעוד API</h3>
-              <div className="space-y-4 text-sm">
+              <h3 className="text-lg font-bold text-gray-800 mb-4">תיעוד API עם דוגמאות cURL</h3>
+              {selectedApiKey ? (
+                <p className="text-sm text-green-600 bg-green-50 px-3 py-2 rounded-lg mb-4">משתמש במפתח: {selectedApiKey.name}</p>
+              ) : (
+                <p className="text-sm text-yellow-600 bg-yellow-50 px-3 py-2 rounded-lg mb-4">בחר מפתח API מהרשימה למעלה לקבלת דוגמאות מותאמות</p>
+              )}
+              
+              <div className="space-y-6">
                 <div className="bg-gray-50 rounded-xl p-4">
-                  <p className="font-semibold text-gray-700 mb-2">שיוך טלפון לפרוקסי</p>
-                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
-                    POST /api/v1/phone/assign<br/>
-                    Headers: X-API-Key: your-api-key<br/>
-                    Body: {`{ "phone": "0501234567", "proxyIp": "1.2.3.4", "port": 8080 }`}
-                  </code>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-gray-700">שיוך טלפון לפרוקסי</p>
+                    <button onClick={() => copyToClipboard(getCurlExample('/phone/assign', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4", port: 8080 }), 'curl-assign')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-assign' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                      {copied === 'curl-assign' ? 'הועתק!' : 'העתק'}
+                    </button>
+                  </div>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/phone/assign', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4", port: 8080 })}</pre>
                 </div>
+
                 <div className="bg-gray-50 rounded-xl p-4">
-                  <p className="font-semibold text-gray-700 mb-2">הסרת שיוך טלפון</p>
-                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
-                    POST /api/v1/phone/remove<br/>
-                    Headers: X-API-Key: your-api-key<br/>
-                    Body: {`{ "phone": "0501234567", "proxyIp": "1.2.3.4" }`}
-                  </code>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-gray-700">הסרת שיוך טלפון</p>
+                    <button onClick={() => copyToClipboard(getCurlExample('/phone/remove', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4" }), 'curl-remove')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-remove' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                      {copied === 'curl-remove' ? 'הועתק!' : 'העתק'}
+                    </button>
+                  </div>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/phone/remove', 'POST', { phone: "0501234567", proxyIp: "1.2.3.4" })}</pre>
                 </div>
+
                 <div className="bg-gray-50 rounded-xl p-4">
-                  <p className="font-semibold text-gray-700 mb-2">קבלת פרוקסי פנויים</p>
-                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
-                    GET /api/v1/proxies/available<br/>
-                    Headers: X-API-Key: your-api-key
-                  </code>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-gray-700">קבלת פרוקסי פנויים</p>
+                    <button onClick={() => copyToClipboard(getCurlExample('/proxies/available', 'GET', null), 'curl-available')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-available' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                      {copied === 'curl-available' ? 'הועתק!' : 'העתק'}
+                    </button>
+                  </div>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/proxies/available', 'GET', null)}</pre>
                 </div>
+
                 <div className="bg-gray-50 rounded-xl p-4">
-                  <p className="font-semibold text-gray-700 mb-2">קבלת כל הפרוקסי</p>
-                  <code className="block bg-gray-800 text-green-400 p-3 rounded-lg font-mono text-xs" dir="ltr">
-                    GET /api/v1/proxies/all<br/>
-                    Headers: X-API-Key: your-api-key
-                  </code>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="font-semibold text-gray-700">קבלת כל הפרוקסי</p>
+                    <button onClick={() => copyToClipboard(getCurlExample('/proxies/all', 'GET', null), 'curl-all')} className={`px-3 py-1 text-xs rounded ${copied === 'curl-all' ? 'bg-green-100 text-green-600' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>
+                      {copied === 'curl-all' ? 'הועתק!' : 'העתק'}
+                    </button>
+                  </div>
+                  <pre className="bg-gray-800 text-green-400 p-4 rounded-lg font-mono text-xs overflow-x-auto" dir="ltr">{getCurlExample('/proxies/all', 'GET', null)}</pre>
                 </div>
               </div>
             </div>
@@ -564,15 +667,56 @@ export default function Dashboard() {
                 <label className="block text-sm font-semibold text-gray-700 mb-2">כתובת IP ראשית</label>
                 <input type="text" value={serverForm.mainIp} onChange={(e) => setServerForm({ ...serverForm, mainIp: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono focus:ring-2 focus:ring-indigo-500" required />
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">כתובות IP לפרוקסי (שורה לכל כתובת)</label>
-                <textarea value={serverForm.proxyIps} onChange={(e) => setServerForm({ ...serverForm, proxyIps: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-800 font-mono h-36 focus:ring-2 focus:ring-indigo-500 resize-none" required />
-              </div>
+              <p className="text-sm text-gray-500">לאחר יצירת השרת, תוכל להוסיף כתובות פרוקסי דרך כפתור "+ פרוקסי"</p>
               <div className="flex gap-3 pt-4">
                 <button type="submit" className="flex-1 py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-semibold rounded-xl shadow-lg">{editingServer ? 'עדכן' : 'הוסף'}</button>
                 <button type="button" onClick={() => setShowServerModal(false)} className="px-6 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">ביטול</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Proxy Manager Modal */}
+      {showProxyModal && selectedServer && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl border border-gray-200 w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="text-2xl font-bold text-gray-800">ניהול פרוקסי</h2>
+              <p className="text-gray-500">{selectedServer.name}</p>
+            </div>
+            <div className="p-6 flex-1 overflow-y-auto">
+              <form onSubmit={handleAddProxy} className="flex gap-3 mb-6">
+                <div className="flex-1">
+                  <label className="block text-xs text-gray-500 mb-1">כתובת IP</label>
+                  <input type="text" value={proxyForm.ip} onChange={(e) => setProxyForm({ ...proxyForm, ip: e.target.value })} placeholder="1.2.3.4" className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-mono" required />
+                </div>
+                <div className="w-32">
+                  <label className="block text-xs text-gray-500 mb-1">פורט (אופציונלי)</label>
+                  <input type="number" value={proxyForm.port} onChange={(e) => setProxyForm({ ...proxyForm, port: e.target.value })} placeholder="אוטו" className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-mono" />
+                </div>
+                <div className="flex items-end">
+                  <button type="submit" className="px-6 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-medium">הוסף</button>
+                </div>
+              </form>
+
+              <div className="space-y-2">
+                {servers.find(s => s.id === selectedServer.id)?.proxyIps?.map(proxy => (
+                  <div key={proxy.id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                    <span className="font-mono text-gray-700">{proxy.ip}:{proxy.port}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-500">{proxy.phones?.length || 0} טלפונים</span>
+                      <button onClick={() => handleDeleteProxy(selectedServer.id, proxy.id)} className="text-red-500 hover:text-red-700">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-100">
+              <button onClick={() => setShowProxyModal(false)} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
+            </div>
           </div>
         </div>
       )}
@@ -584,24 +728,23 @@ export default function Dashboard() {
             <div className="p-6 border-b border-gray-100">
               <h2 className="text-2xl font-bold text-gray-800">הוספת משתמש</h2>
             </div>
-            {newUserPassword ? (
+            {inviteLink ? (
               <div className="p-6">
                 <div className="bg-green-50 border border-green-200 rounded-2xl p-5 mb-6">
-                  <p className="text-green-700 font-bold text-lg mb-2">משתמש נוצר!</p>
-                  <p className="text-gray-600 text-sm mb-2">סיסמה זמנית:</p>
-                  <code className="block font-mono text-lg text-gray-800 bg-white rounded-xl px-4 py-3 border">{newUserPassword}</code>
+                  <p className="text-green-700 font-bold text-lg mb-3">משתמש נוצר!</p>
+                  <p className="text-gray-600 text-sm mb-2">שלח את הלינק הבא למשתמש להשלמת ההרשמה:</p>
+                  <div className="bg-white rounded-xl px-4 py-3 border font-mono text-sm break-all">{inviteLink}</div>
                 </div>
-                <button onClick={() => { setShowUserModal(false); setNewUserPassword(''); }} className="w-full py-3.5 bg-indigo-500 text-white font-semibold rounded-xl">סגור</button>
+                <button onClick={() => copyToClipboard(inviteLink, 'invite-link')} className={`w-full py-3 mb-3 font-semibold rounded-xl ${copied === 'invite-link' ? 'bg-green-500 text-white' : 'bg-indigo-500 text-white hover:bg-indigo-600'}`}>
+                  {copied === 'invite-link' ? 'הועתק!' : 'העתק לינק'}
+                </button>
+                <button onClick={() => { setShowUserModal(false); setInviteLink(''); }} className="w-full py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
               </div>
             ) : (
               <form onSubmit={handleCreateUser} className="p-6 space-y-5">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">אימייל</label>
                   <input type="email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">שם</label>
-                  <input type="text" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">תפקיד</label>
@@ -611,6 +754,7 @@ export default function Dashboard() {
                     <option value="admin">מנהל</option>
                   </select>
                 </div>
+                <p className="text-sm text-gray-500">המשתמש יקבל לינק חד פעמי להגדרת סיסמה</p>
                 <div className="flex gap-3 pt-4">
                   <button type="submit" className="flex-1 py-3.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold rounded-xl shadow-lg">צור</button>
                   <button type="button" onClick={() => setShowUserModal(false)} className="px-6 py-3.5 bg-gray-100 text-gray-700 font-semibold rounded-xl">ביטול</button>
@@ -660,18 +804,18 @@ export default function Dashboard() {
             <div className="p-6 border-b border-gray-100">
               <h2 className="text-xl font-bold text-gray-800">יצירת מפתח API</h2>
             </div>
-            {newApiKey ? (
+            {selectedApiKey && !apiKeys.find(k => k.id === selectedApiKey.id) ? (
               <div className="p-6">
-                <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-4">
-                  <p className="text-yellow-700 font-semibold mb-2">שמור את המפתח! לא תוכל לראות אותו שוב.</p>
+                <div className="bg-green-50 border border-green-200 rounded-2xl p-4 mb-4">
+                  <p className="text-green-700 font-semibold mb-2">מפתח נוצר בהצלחה!</p>
                 </div>
                 <div className="bg-gray-50 rounded-xl p-4 mb-6">
-                  <p className="font-mono text-sm break-all">{newApiKey}</p>
+                  <p className="font-mono text-sm break-all">{selectedApiKey.key}</p>
                 </div>
-                <button onClick={() => copyToClipboard(newApiKey, 'new-api-key')} className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-xl mb-3">
+                <button onClick={() => copyToClipboard(selectedApiKey.key, 'new-api-key')} className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-xl mb-3">
                   {copied === 'new-api-key' ? 'הועתק!' : 'העתק מפתח'}
                 </button>
-                <button onClick={() => { setShowApiKeyModal(false); setNewApiKey(''); }} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
+                <button onClick={() => { setShowApiKeyModal(false); setSelectedApiKey(null); }} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl">סגור</button>
               </div>
             ) : (
               <form onSubmit={handleCreateApiKey} className="p-6 space-y-5">

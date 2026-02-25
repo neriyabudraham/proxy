@@ -38,7 +38,7 @@ router.post('/', async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   
-  const { name, mainIp, proxyIps } = req.body;
+  const { name, mainIp } = req.body;
   
   const result = await db.execute(
     'INSERT INTO servers (name, main_ip, user_id) VALUES ($1, $2, $3) RETURNING id',
@@ -46,17 +46,8 @@ router.post('/', async (req, res) => {
   );
   
   const serverId = result.rows[0].id;
-  
-  for (let i = 0; i < proxyIps.length; i++) {
-    await db.execute(
-      'INSERT INTO proxy_ips (ip, port, server_id) VALUES ($1, $2, $3)',
-      [proxyIps[i], 8080 + i, serverId]
-    );
-  }
-  
   const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [serverId]);
-  const ips = await db.query('SELECT * FROM proxy_ips WHERE server_id = $1', [serverId]);
-  server.proxyIps = ips.map(ip => ({ ...ip, phones: [] }));
+  server.proxyIps = [];
   
   res.json(server);
 });
@@ -67,21 +58,16 @@ router.put('/:id', async (req, res) => {
   }
   
   const { id } = req.params;
-  const { name, mainIp, proxyIps } = req.body;
+  const { name, mainIp } = req.body;
   
   await db.execute('UPDATE servers SET name = $1, main_ip = $2 WHERE id = $3', [name, mainIp, id]);
-  await db.execute('DELETE FROM proxy_ips WHERE server_id = $1', [id]);
-  
-  for (let i = 0; i < proxyIps.length; i++) {
-    await db.execute(
-      'INSERT INTO proxy_ips (ip, port, server_id) VALUES ($1, $2, $3)',
-      [proxyIps[i], 8080 + i, id]
-    );
-  }
   
   const server = await db.queryOne('SELECT * FROM servers WHERE id = $1', [id]);
-  const ips = await db.query('SELECT * FROM proxy_ips WHERE server_id = $1', [id]);
-  server.proxyIps = ips.map(ip => ({ ...ip, phones: [] }));
+  const ips = await db.query('SELECT * FROM proxy_ips WHERE server_id = $1 ORDER BY port', [id]);
+  server.proxyIps = await Promise.all(ips.map(async (proxy) => {
+    const phones = await db.query('SELECT * FROM phone_numbers WHERE proxy_id = $1', [proxy.id]);
+    return { ...proxy, phones };
+  }));
   
   res.json(server);
 });
@@ -92,6 +78,58 @@ router.delete('/:id', async (req, res) => {
   }
   
   await db.execute('DELETE FROM servers WHERE id = $1', [req.params.id]);
+  res.json({ success: true });
+});
+
+// Proxy IP management
+router.post('/:serverId/proxies', async (req, res) => {
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  const { serverId } = req.params;
+  const { ip, port } = req.body;
+  
+  // If port not specified, find next available
+  let assignedPort = port;
+  if (!assignedPort) {
+    const maxPort = await db.queryOne(
+      'SELECT COALESCE(MAX(port), 8079) as max_port FROM proxy_ips WHERE server_id = $1',
+      [serverId]
+    );
+    assignedPort = maxPort.max_port + 1;
+  }
+  
+  const result = await db.execute(
+    'INSERT INTO proxy_ips (ip, port, server_id) VALUES ($1, $2, $3) RETURNING *',
+    [ip, assignedPort, serverId]
+  );
+  
+  res.json({ ...result.rows[0], phones: [] });
+});
+
+router.put('/:serverId/proxies/:proxyId', async (req, res) => {
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  const { proxyId } = req.params;
+  const { ip, port } = req.body;
+  
+  await db.execute('UPDATE proxy_ips SET ip = $1, port = $2 WHERE id = $3', [ip, port, proxyId]);
+  
+  const proxy = await db.queryOne('SELECT * FROM proxy_ips WHERE id = $1', [proxyId]);
+  const phones = await db.query('SELECT * FROM phone_numbers WHERE proxy_id = $1', [proxyId]);
+  
+  res.json({ ...proxy, phones });
+});
+
+router.delete('/:serverId/proxies/:proxyId', async (req, res) => {
+  if (req.user.role === 'viewer') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  
+  await db.execute('DELETE FROM proxy_ips WHERE id = $1', [req.params.proxyId]);
   res.json({ success: true });
 });
 
@@ -133,38 +171,45 @@ router.get('/:id/script', async (req, res) => {
     'SELECT * FROM proxy_ips WHERE server_id = $1 ORDER BY port',
     [server.id]
   );
-  const ips = proxyIps.map(p => p.ip);
-  const ipsString = ips.map(ip => `"${ip}"`).join(' ');
   
-  const script = generateScript(server.name, ipsString);
+  if (proxyIps.length === 0) {
+    return res.status(400).json({ error: 'No proxy IPs configured' });
+  }
+  
+  const script = generateScript(server.name, proxyIps);
   
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="setup-${server.name.replace(/\s+/g, '-')}.sh"`);
   res.send(script);
 });
 
-function generateScript(serverName, ipsString) {
+function generateScript(serverName, proxyIps) {
+  const ipsArray = proxyIps.map(p => `"${p.ip}"`).join(' ');
+  const portsArray = proxyIps.map(p => p.port).join(' ');
+  
   return `#!/bin/bash
 # --- סקריפט התקנה אוטומטי עבור שרת: ${serverName} ---
 # --- נוצר אוטומטית על ידי מערכת ניהול פרוקסי ---
 
-# --- הגדרת ה-IPs ---
-IPS=(${ipsString})
+# הגדרת כתובות IP ופורטים
+IPS=(${ipsArray})
+PORTS=(${portsArray})
 
-# --- תחילת הסקריפט האוטומטי ---
+# הרצת הסקריפט האוטומטי המלא
 sudo bash -c '
 set -e
-echo "🚀 מתחיל תהליך הקמה דינאמי הכולל Firewall..."
+export DEBIAN_FRONTEND=noninteractive
 
-# 1. זיהוי נתוני רשת
+echo "📂 1/6: מנקה התקנות קודמות ומתקין Docker..."
+apt-get update && apt-get install -y docker.io docker-compose curl
+killall -9 tinyproxy 2>/dev/null || true
+docker rm -f $(docker ps -aq --filter name=proxy-p) 2>/dev/null || true
+
+echo "📡 2/6: מגדיר כתובות IP במערכת (Netplan)..."
 INTERFACE=$(ip -o -4 route show to default | awk "{print \\$5}")
 GATEWAY=$(ip route | grep default | awk "{print \\$3}")
-echo "📡 מזוהה ממשק: $INTERFACE, Gateway: $GATEWAY"
-
-# 2. עדכון Netplan
-echo "⚙️ מעדכן הגדרות רשת (Netplan)..."
 NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
-[ -f $NETPLAN_FILE ] && cp $NETPLAN_FILE "\${NETPLAN_FILE}.bak"
+cp $NETPLAN_FILE "\${NETPLAN_FILE}.bak"
 
 cat <<NETPLAN > $NETPLAN_FILE
 network:
@@ -173,11 +218,9 @@ network:
         $INTERFACE:
             addresses:
 NETPLAN
-
 for ip in "\${IPS[@]}"; do
     echo "            - $ip/32" >> $NETPLAN_FILE
 done
-
 cat <<NETPLAN >> $NETPLAN_FILE
             routes:
                 - to: default
@@ -185,92 +228,52 @@ cat <<NETPLAN >> $NETPLAN_FILE
             nameservers:
                 addresses: [8.8.8.8, 1.1.1.1]
 NETPLAN
-
 netplan apply
 sleep 2
 
-# 3. התקנה וניקוי
-apt update && apt install tinyproxy curl -y
-killall -9 tinyproxy 2>/dev/null || true
-mkdir -p /etc/tinyproxy/instances /var/log/tinyproxy /run/tinyproxy
-chown -R tinyproxy:tinyproxy /var/log/tinyproxy /run/tinyproxy
+echo "🏗️ 3/6: בונה אימג פרוקסי אנונימי מקומי..."
+mkdir -p ~/proxy-factory && cd ~/proxy-factory
+cat <<DOCKERFILE > Dockerfile
+FROM alpine:latest
+RUN apk add --no-cache tinyproxy
+RUN echo -e "User tinyproxy\\nGroup tinyproxy\\nPort 8888\\nTimeout 600\\nMaxClients 500\\nAllow 0.0.0.0/0\\nDisableViaHeader Yes\\nConnectPort 443\\nConnectPort 5222\\nAnonymous \\"Host\\"\\nAnonymous \\"Authorization\\"\\nAnonymous \\"User-Agent\\"" > /etc/tinyproxy/tinyproxy.conf
+CMD ["tinyproxy", "-d"]
+DOCKERFILE
+docker build -t local-tinyproxy .
 
-# 4. הגדרת Firewall
-echo "🛡️ מעדכן חומת אש (UFW)..."
-ufw allow ssh || true
-PORT=8080
-for ip in "\${IPS[@]}"; do
+echo "📝 4/6: מייצר קובץ Docker Compose דינאמי..."
+cat <<COMPOSE > docker-compose.yml
+version: "3.8"
+services:
+COMPOSE
+
+for i in "\${!IPS[@]}"; do
+    IP="\${IPS[$i]}"
+    PORT="\${PORTS[$i]}"
+    cat <<COMPOSE >> docker-compose.yml
+  proxy-p$PORT:
+    image: local-tinyproxy
+    container_name: proxy-p$PORT
+    restart: always
+    ports:
+      - "$IP:$PORT:8888"
+COMPOSE
+done
+
+echo "🛡️ 5/6: פותח Firewall פנימי (UFW)..."
+ufw allow ssh >> /dev/null
+for PORT in "\${PORTS[@]}"; do
     ufw allow $PORT/tcp >> /dev/null
-    PORT=$((PORT + 1))
 done
-echo "y" | ufw enable || true
+echo "y" | ufw enable >> /dev/null
 
-# 5. יצירת מופעים
-echo "🛠️ מקים מופעי פרוקסי..."
-PORT=8080
-START_SCRIPT="/usr/local/bin/start-proxies.sh"
-echo "#!/bin/bash" > $START_SCRIPT
-echo "killall -9 tinyproxy 2>/dev/null" >> $START_SCRIPT
+echo "🚢 6/6: מפעיל את הקונטיינרים..."
+docker-compose up -d
 
-for ip in "\${IPS[@]}"; do
-    CONF="/etc/tinyproxy/instances/p\${PORT}.conf"
-    cat <<CONF > $CONF
-User tinyproxy
-Group tinyproxy
-Port $PORT
-Listen 0.0.0.0
-Bind $ip
-Timeout 600
-MaxClients 100
-Allow 0.0.0.0/0
-DisableViaHeader Yes
-ConnectPort 443
-ConnectPort 5222
-PidFile "/run/tinyproxy/p\${PORT}.pid"
-LogFile "/var/log/tinyproxy/p\${PORT}.log"
-Anonymous "Host"
-Anonymous "Authorization"
-Anonymous "User-Agent"
-CONF
-    echo "tinyproxy -c $CONF" >> $START_SCRIPT
-    PORT=$((PORT + 1))
-done
-
-# 6. הגדרת שירות מערכת
-chmod +x $START_SCRIPT
-cat <<SERVICE > /etc/systemd/system/proxy-farm.service
-[Unit]
-Description=Dynamic Proxy Farm
-After=network.target
-
-[Service]
-Type=forking
-ExecStart=$START_SCRIPT
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-systemctl daemon-reload
-systemctl enable proxy-farm.service
-systemctl start proxy-farm.service
-sleep 2
-
-# 7. בדיקה סופית
-echo "--- 🔍 מבצע בדיקת תקינות סופית ---"
-PORT=8080
-for ip in "\${IPS[@]}"; do
-    RESULT=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 -x http://localhost:$PORT http://www.google.com || echo "FAILED")
-    if [ "$RESULT" == "200" ]; then
-        echo "✅ Port $PORT ($ip): עובד!"
-    else
-        echo "❌ Port $PORT ($ip): נכשל"
-    fi
-    PORT=$((PORT + 1))
-done
-
-echo "--- ✨ הסקריפט הסתיים! ---"
+echo ""
+echo "--- ✨ המערכת הוקמה בהצלחה! ---"
+echo "רשימת הפרוקסים הפעילים שלך:"
+docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
 '
 `;
 }

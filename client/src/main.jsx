@@ -5,6 +5,7 @@ import './index.css';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import ResetPassword from './pages/ResetPassword';
+import Invite from './pages/Invite';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function ProtectedRoute({ children }) {
@@ -27,6 +28,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/invite/:token" element={<Invite />} />
         <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/dashboard" />} />
       </Routes>

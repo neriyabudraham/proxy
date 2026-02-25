@@ -30,13 +30,21 @@ router.get('/keys', authMiddleware, async (req, res) => {
     [req.user.id]
   );
   
-  // Mask the keys for display
-  const maskedKeys = keys.map(k => ({
-    ...k,
-    key: k.key.substring(0, 8) + '...' + k.key.substring(k.key.length - 4)
-  }));
+  // Return full keys
+  res.json(keys);
+});
+
+router.get('/keys/:id', authMiddleware, async (req, res) => {
+  const key = await db.queryOne(
+    'SELECT id, name, key, created_at FROM api_keys WHERE id = $1 AND user_id = $2',
+    [req.params.id, req.user.id]
+  );
   
-  res.json(maskedKeys);
+  if (!key) {
+    return res.status(404).json({ error: 'API key not found' });
+  }
+  
+  res.json(key);
 });
 
 router.post('/keys', authMiddleware, async (req, res) => {
@@ -44,11 +52,11 @@ router.post('/keys', authMiddleware, async (req, res) => {
   const key = 'pk_' + crypto.randomBytes(32).toString('hex');
   
   const result = await db.execute(
-    'INSERT INTO api_keys (key, name, user_id) VALUES ($1, $2, $3) RETURNING id',
+    'INSERT INTO api_keys (key, name, user_id) VALUES ($1, $2, $3) RETURNING id, key, name, created_at',
     [key, name || 'API Key', req.user.id]
   );
   
-  res.json({ id: result.rows[0].id, key, name });
+  res.json(result.rows[0]);
 });
 
 router.delete('/keys/:id', authMiddleware, async (req, res) => {

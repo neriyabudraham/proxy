@@ -135,6 +135,56 @@ router.post('/reset-password', async (req, res) => {
   res.json({ success: true });
 });
 
+// Invite token verification
+router.get('/verify-invite/:token', async (req, res) => {
+  const { token } = req.params;
+  
+  const user = await db.queryOne('SELECT id, email, role FROM users WHERE invite_token = $1', [token]);
+  
+  if (!user) {
+    return res.status(404).json({ error: 'Invalid or expired invite link' });
+  }
+  
+  res.json({ email: user.email, role: user.role });
+});
+
+// Complete registration via invite
+router.post('/complete-invite', async (req, res) => {
+  const { token, password, name } = req.body;
+  
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  }
+  
+  const user = await db.queryOne('SELECT * FROM users WHERE invite_token = $1', [token]);
+  
+  if (!user) {
+    return res.status(404).json({ error: 'Invalid or expired invite link' });
+  }
+  
+  const hashedPassword = await bcrypt.hash(password, 12);
+  
+  await db.execute(
+    'UPDATE users SET password = $1, name = $2, password_setup = true, invite_token = NULL WHERE id = $3',
+    [hashedPassword, name || '', user.id]
+  );
+  
+  const updatedUser = await db.queryOne('SELECT * FROM users WHERE id = $1', [user.id]);
+  const authToken = generateToken(updatedUser);
+  
+  res.cookie('token', authToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+  
+  res.json({
+    success: true,
+    user: { id: updatedUser.id, email: updatedUser.email, name: updatedUser.name, role: updatedUser.role }
+  });
+});
+
 router.post('/google', async (req, res) => {
   const { credential } = req.body;
   

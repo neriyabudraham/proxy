@@ -23,8 +23,17 @@ export async function initDB() {
         role VARCHAR(50) DEFAULT 'viewer',
         parent_id INTEGER REFERENCES users(id),
         password_setup BOOLEAN DEFAULT false,
+        invite_token VARCHAR(255),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      
+      -- Add invite_token column if not exists (for existing tables)
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='invite_token') THEN
+          ALTER TABLE users ADD COLUMN invite_token VARCHAR(255);
+        END IF;
+      END $$;
 
       CREATE TABLE IF NOT EXISTS servers (
         id SERIAL PRIMARY KEY,
